@@ -25,6 +25,10 @@ const ALL_CUE_TYPES = [...MARGIN_CUE_TYPES, ...FREE_CUE_TYPES];
 const isMarginCue = (type) => MARGIN_CUE_TYPES.includes(type);
 const isFreeCue = (type) => FREE_CUE_TYPES.includes(type);
 const hasLines = (type) => type === "SFX" || type === "TM";
+const getCueTypeName = (type) => (type === "TM" ? "Scene" : type);
+const getCueTypeOptionLabel = (type) =>
+  type === "TM" ? "SCENE" : type;
+const getCueTypeAbbreviation = (type) => (type === "TM" ? "SCENE" : type);
 
 export default function App() {
   const { pages, pdfBytes, loadPdf } = usePdfRenderer();
@@ -377,7 +381,7 @@ const handleCloseDiscard = async () => {
   };
 
   const addCue = (pageIndex, x, y) => {
-    const label = prompt(`Enter ${mode} Cue:`);
+    const label = prompt(`Enter ${getCueTypeName(mode)} Cue:`);
     if (!label) return;
 
     pushUndo(cues);
@@ -411,25 +415,31 @@ const handleCloseDiscard = async () => {
     );
   };
 
-  const startDragCue = (e, cueId) => {
+  const startDragCueLine = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
     const rect = svg.getBoundingClientRect();
+    const startClientX = e.clientX;
     const startClientY = e.clientY;
     let didMove = false;
 
     const move = (ev) => {
-      const delta = Math.abs(ev.clientY - startClientY);
-      if (delta > 2) didMove = true;
+      const deltaX = Math.abs(ev.clientX - startClientX);
+      const deltaY = Math.abs(ev.clientY - startClientY);
+      if (deltaX > 2 || deltaY > 2) didMove = true;
 
+      const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
+      const newX = (ev.clientX - rect.left) * scaleX;
       const newY = (ev.clientY - rect.top) * scaleY;
 
       setCues((prev) =>
-        prev.map((c) => (c.id === cueId ? { ...c, y: newY } : c))
+        prev.map((c) =>
+          c.id === cueId ? { ...c, x: newX, y: newY } : c
+        )
       );
     };
 
@@ -644,6 +654,8 @@ const handleCloseDiscard = async () => {
       return (
         cue.label.toLowerCase().includes(q) ||
         cue.type.toLowerCase().includes(q) ||
+        getCueTypeName(cue.type).toLowerCase().includes(q) ||
+        getCueTypeAbbreviation(cue.type).toLowerCase().includes(q) ||
         String(cue.page + 1).includes(q)
       );
     })
@@ -743,7 +755,7 @@ const handleCloseDiscard = async () => {
             <select value={mode} onChange={(e) => setMode(e.target.value)}>
               {ALL_CUE_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type}
+                  {getCueTypeOptionLabel(type)}
                 </option>
               ))}
             </select>
@@ -766,7 +778,7 @@ const handleCloseDiscard = async () => {
               background: "white",
             }}
           >
-            <strong>{mode} Settings</strong>
+            <strong>{getCueTypeName(mode)} Settings</strong>
 
             <label>
               Colour{" "}
@@ -956,6 +968,17 @@ const handleCloseDiscard = async () => {
 
                           <line
                             x1={cue.x}
+                            y1={cue.y - 10}
+                            x2={cue.x}
+                            y2={cue.y + 10}
+                            stroke="transparent"
+                            strokeWidth={12}
+                            style={{ cursor: "move" }}
+                            onMouseDown={(e) => startDragCueLine(e, cue.id)}
+                          />
+
+                          <line
+                            x1={cue.x}
                             y1={cue.y + 10}
                             x2={marginX}
                             y2={cue.y + 10}
@@ -982,8 +1005,7 @@ const handleCloseDiscard = async () => {
                         fill={color}
                         fontWeight="bold"
                         fontSize={cueStyle.textSize}
-                        style={{ cursor: "grab", userSelect: "none" }}
-                        onMouseDown={(e) => startDragCue(e, cue.id)}
+                        style={{ cursor: "text", userSelect: "none" }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           updateCue(cue.id);
@@ -1120,7 +1142,7 @@ const handleCloseDiscard = async () => {
                     fontWeight: "bold",
                   }}
                 >
-                  {type}
+                  {getCueTypeOptionLabel(type)}
                 </span>
               </label>
             ))}
@@ -1185,7 +1207,7 @@ const handleCloseDiscard = async () => {
                   color: colors[cue.type],
                 }}
               >
-                {cue.type}
+                {getCueTypeAbbreviation(cue.type)}
               </strong>{" "}
               {cue.label}
 
