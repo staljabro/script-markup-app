@@ -46,5 +46,10 @@ export function usePdfRenderer() {
     setPages(loadedPages);
   };
 
-  return { pages, pdfBytes, loadPdf };
+  const clearPdf = () => {
+    setPages([]);
+    setPdfBytes(null);
+  };
+
+  return { pages, pdfBytes, loadPdf, clearPdf };
 }
