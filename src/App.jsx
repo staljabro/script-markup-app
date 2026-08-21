@@ -145,6 +145,24 @@ export default function App() {
   const cueRefs = useRef({});
   const dirtyRef = useRef(false);
   const autosaveStateRef = useRef(null);
+  const toolToolbarRef = useRef(null);
+
+  useEffect(() => {
+    const toolbar = toolToolbarRef.current;
+    if (!toolbar) return undefined;
+
+    const updateToolbarHeight = () => {
+      document.documentElement.style.setProperty("--tool-toolbar-height", `${toolbar.offsetHeight}px`);
+    };
+    const observer = new ResizeObserver(updateToolbarHeight);
+    observer.observe(toolbar);
+    updateToolbarHeight();
+
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--tool-toolbar-height");
+    };
+  }, []);
 
   const [margins, setMargins] = useState({
     SFX: 150,
@@ -1256,64 +1274,67 @@ export default function App() {
           <button className="toolbar-help" onClick={() => setShowHelp(true)} aria-label="Help" title="Help"><ToolbarIcon name="help" /></button>
         </div>
 
-        <nav className="tool-toolbar" aria-label="Cue tools">
-          {TOOL_BUTTONS.map((tool) => (
+        <nav ref={toolToolbarRef} className="tool-toolbar" aria-label="Cue tools">
+          <div className="tool-toolbar-group cue-tool-group">
+            {TOOL_BUTTONS.map((tool) => (
+              <button
+                key={tool.type}
+                className={mode === tool.type ? "is-active" : ""}
+                onClick={() => {
+                  setFadeStart(null);
+                  setBlockStart(null);
+                  setMode(tool.type);
+                }}
+                title={tool.label}
+                aria-label={tool.label}
+                aria-pressed={mode === tool.type}
+              >
+                <MaterialIcon path={tool.icon} />
+                <span>{tool.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="tool-toolbar-group view-tool-group">
             <button
-              key={tool.type}
-              className={mode === tool.type ? "is-active" : ""}
-              onClick={() => {
-                setFadeStart(null);
-                setBlockStart(null);
-                setMode(tool.type);
-              }}
-              title={tool.label}
-              aria-label={tool.label}
-              aria-pressed={mode === tool.type}
+              className={`tool-layout-button ${pageLayout === "single" ? "is-active" : ""}`}
+              onClick={() => setPageLayout("single")}
+              aria-label="Pages in line"
+              title="Pages in line"
+              aria-pressed={pageLayout === "single"}
             >
-              <MaterialIcon path={tool.icon} />
-              <span>{tool.label}</span>
+              <ToolbarIcon name="stack" />
             </button>
-          ))}
-          <div className="tool-toolbar-spacer" />
-          <button
-            className={`tool-layout-button ${pageLayout === "single" ? "is-active" : ""}`}
-            onClick={() => setPageLayout("single")}
-            aria-label="Pages in line"
-            title="Pages in line"
-            aria-pressed={pageLayout === "single"}
-          >
-            <ToolbarIcon name="stack" />
-          </button>
-          <button
-            className={`tool-layout-button ${pageLayout === "spread" ? "is-active" : ""}`}
-            onClick={() => setPageLayout("spread")}
-            aria-label="Pages side by side"
-            title="Pages side by side"
-            aria-pressed={pageLayout === "spread"}
-          >
-            <ToolbarIcon name="columns" />
-          </button>
-          <label className="display-scale-control">
-            <span>Scale</span>
-            <input
-              type="range"
-              min="0.5"
-              max="1.5"
-              step="0.05"
-              value={displayScale}
-              onChange={(e) => setDisplayScale(parseFloat(e.target.value))}
-            />
-            <output>{Math.round(displayScale * 100)}%</output>
-          </label>
-          <button
-            className={showCueList ? "is-active" : ""}
-            onClick={() => setShowCueList((visible) => !visible)}
-            aria-pressed={showCueList}
-            title={showCueList ? "Hide cue list" : "Show cue list"}
-          >
-            <MaterialIcon path={mdiEye} />
-            <span>Cue List</span>
-          </button>
+            <button
+              className={`tool-layout-button ${pageLayout === "spread" ? "is-active" : ""}`}
+              onClick={() => setPageLayout("spread")}
+              aria-label="Pages side by side"
+              title="Pages side by side"
+              aria-pressed={pageLayout === "spread"}
+            >
+              <ToolbarIcon name="columns" />
+            </button>
+            <label className="display-scale-control">
+              <span>Scale</span>
+              <input
+                type="range"
+                min="0.5"
+                max="1.5"
+                step="0.05"
+                value={displayScale}
+                onChange={(e) => setDisplayScale(parseFloat(e.target.value))}
+              />
+              <output>{Math.round(displayScale * 100)}%</output>
+            </label>
+            <button
+              className={showCueList ? "is-active" : ""}
+              onClick={() => setShowCueList((visible) => !visible)}
+              aria-pressed={showCueList}
+              title={showCueList ? "Hide cue list" : "Show cue list"}
+            >
+              <MaterialIcon path={mdiEye} />
+              <span>Cue List</span>
+            </button>
+          </div>
         </nav>
 
         <div className={`options-drawer ${showOptionsDrawer ? "is-open" : ""}`}>
