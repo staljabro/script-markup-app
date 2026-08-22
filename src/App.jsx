@@ -125,6 +125,8 @@ export default function App() {
 
   const [showCueList, setShowCueList] = useState(true);
   const [pageLayout, setPageLayout] = useState("single");
+  const [notesPageSide, setNotesPageSide] = useState("off");
+  const [callingPageSide, setCallingPageSide] = useState("left");
   const [displayScale, setDisplayScale] = useState(1);
   const [documentName, setDocumentName] = useState("Untitled");
   const [documentNameDraft, setDocumentNameDraft] = useState("Untitled");
@@ -227,6 +229,9 @@ export default function App() {
       blockAppearance,
       documentName,
       hiddenCueTypes,
+      notesPageSide,
+      callingPageSide,
+      combinedNotesCanvas: true,
     };
   };
 
@@ -260,6 +265,10 @@ export default function App() {
       ...current,
       ...(project.hiddenCueTypes || {}),
     }));
+    setNotesPageSide(project.notesPageSide || "off");
+    setCallingPageSide(project.notesPageSide && project.notesPageSide !== "off"
+      ? project.notesPageSide
+      : (project.callingPageSide || "left"));
     setSelectedCueId(null);
     setFadeStart(null);
     setBlockStart(null);
@@ -268,6 +277,26 @@ export default function App() {
   useEffect(() => {
     loadProjectDataRef.current = loadProjectData;
   });
+
+  useEffect(() => {
+    if (!pages.length || !cues.some((cue) => cue.surface)) return;
+    const migration = setTimeout(() => {
+      setCues((current) => current.map((cue) => {
+        if (!cue.surface) return cue;
+        const pageWidth = pages[cue.page]?.width || 0;
+        const offset = cue.surface === "notes"
+          ? (notesPageSide === "left" ? -pageWidth : pageWidth)
+          : 0;
+        const shifted = { ...cue };
+        for (const key of ["x", "x2", "left", "right"]) {
+          if (typeof shifted[key] === "number") shifted[key] += offset;
+        }
+        delete shifted.surface;
+        return shifted;
+      }));
+    }, 0);
+    return () => clearTimeout(migration);
+  }, [pages, cues, notesPageSide]);
 
   const pushUndo = (snapshot) => {
     setRedoStack([]);
@@ -313,6 +342,7 @@ export default function App() {
     if (!savedName) return false;
     setCurrentProjectPath(savedName);
     setIsDirty(false);
+    alert(`Project saved successfully as "${savedName}".`);
 
     return true;
   };
@@ -330,6 +360,7 @@ export default function App() {
     setCurrentProjectPath(fileName);
 
     setIsDirty(false);
+    alert(`Project saved successfully as "${fileName}".`);
 
     return true;
   };
@@ -344,8 +375,10 @@ export default function App() {
       blockAppearance,
       hiddenCueTypes,
       documentName,
+      notesPageSide,
+      callingPageSide,
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide]);
 
   useEffect(() => {
     const saveSession = async () => {
@@ -365,6 +398,9 @@ export default function App() {
           blockAppearance: latest.blockAppearance,
           hiddenCueTypes: latest.hiddenCueTypes,
           documentName: latest.documentName,
+          notesPageSide: latest.notesPageSide,
+          callingPageSide: latest.callingPageSide,
+          combinedNotesCanvas: true,
         };
 
         const path = await writeAutosaveProject(project);
@@ -385,7 +421,7 @@ export default function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide]);
 
   useEffect(() => {
     if (restoreAttemptedRef.current) return;
@@ -681,7 +717,8 @@ export default function App() {
 
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const newX = (ev.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
       const newY = (ev.clientY - rect.top) * scaleY;
 
       setCues((prev) =>
@@ -728,7 +765,8 @@ export default function App() {
 
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const newX = (ev.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
       const newY = (ev.clientY - rect.top) * scaleY;
 
       setCues((prev) =>
@@ -857,7 +895,8 @@ export default function App() {
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const nextX = (event.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const nextX = (event.clientX - rect.left) * scaleX - coordinateOffset;
       const nextY = (event.clientY - rect.top) * scaleY;
       didMove = true;
 
@@ -935,7 +974,8 @@ export default function App() {
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const nextX = (event.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const nextX = (event.clientX - rect.left) * scaleX - coordinateOffset;
       const nextY = (event.clientY - rect.top) * scaleY;
       moved = true;
       setCues((current) => current.map((cue) => {
@@ -972,16 +1012,38 @@ export default function App() {
 
     try {
       const pdfDoc = await PDFDocument.load(new Uint8Array(pdfBytes));
+      if (notesPageSide !== "off") {
+        for (let pageIndex = pdfDoc.getPageCount() - 1; pageIndex >= 0; pageIndex -= 1) {
+          const { width, height } = pdfDoc.getPage(pageIndex).getSize();
+          const insertAt = notesPageSide === "left" ? pageIndex : pageIndex + 1;
+          pdfDoc.insertPage(insertAt, [width, height]);
+        }
+      }
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
       cues.forEach((cue) => {
         if (hiddenCueTypes[cue.type]) return;
-        const page = pdfDoc.getPage(cue.page);
         const pageInfo = pages[cue.page];
 
         if (!pageInfo) return;
 
-        const viewport = pageInfo.viewport;
+        const documentPageIndex = notesPageSide === "off"
+          ? cue.page
+          : cue.page * 2 + (notesPageSide === "left" ? 1 : 0);
+        const targets = [{ pageIndex: documentPageIndex, xOffset: 0 }];
+        if (notesPageSide !== "off") {
+          targets.push({
+            pageIndex: cue.page * 2 + (notesPageSide === "left" ? 0 : 1),
+            xOffset: notesPageSide === "left" ? pageInfo.width : -pageInfo.width,
+          });
+        }
+
+        targets.forEach(({ pageIndex: targetPageIndex, xOffset }) => {
+        const page = pdfDoc.getPage(targetPageIndex);
+        const baseViewport = pageInfo.viewport;
+        const viewport = {
+          convertToPdfPoint: (x, y) => baseViewport.convertToPdfPoint(x + xOffset, y),
+        };
         const cueStyle = styles[cue.type] || { textSize: 10, lineWidth: 1.5 };
 
         const hex = colors[cue.type] || "#000000";
@@ -1126,6 +1188,7 @@ export default function App() {
           font,
           color,
         });
+        });
       });
 
       const bytes = await pdfDoc.save();
@@ -1135,6 +1198,7 @@ export default function App() {
         `${getSafeProjectName(documentName)}.pdf`
       );
       if (!savedName) return false;
+      alert(`PDF exported successfully as "${savedName}".`);
       return true;
     } catch (err) {
       console.error("EXPORT ERROR:", err);
@@ -1339,6 +1403,75 @@ export default function App() {
     }
   };
 
+  const isOnCallingPage = (x, width, side = notesPageSide) =>
+    side === "left" ? x < 0 : side === "right" ? x > width : false;
+
+  const callingPageHasCues = notesPageSide !== "off" && cues.some((cue) => {
+    const width = pages[cue.page]?.width;
+    if (!width) return false;
+    const cueCoordinates = [cue.x, cue.x2, cue.left, cue.right]
+      .filter((value) => typeof value === "number");
+    if (cueCoordinates.some((x) => isOnCallingPage(x, width))) return true;
+    return isMarginCue(cue.type) && isOnCallingPage(margins[cue.type], width);
+  });
+
+  const moveCallingPageTo = (nextSide) => {
+    if (notesPageSide === "off" || notesPageSide === nextSide) {
+      setCallingPageSide(nextSide);
+      return;
+    }
+
+    setCues((current) => current.map((cue) => {
+      const width = pages[cue.page]?.width || 0;
+      const shifted = { ...cue };
+      const delta = notesPageSide === "left" ? width * 2 : -width * 2;
+      for (const key of ["x", "x2", "left", "right"]) {
+        if (typeof shifted[key] === "number" && isOnCallingPage(shifted[key], width)) {
+          shifted[key] += delta;
+        }
+      }
+      if (shifted.type === "BLOCK" && shifted.left > shifted.right) {
+        [shifted.left, shifted.right] = [shifted.right, shifted.left];
+        shifted.x = shifted.left;
+      }
+      return shifted;
+    }));
+
+    const referenceWidth = pages[0]?.width || 0;
+    const delta = notesPageSide === "left" ? referenceWidth * 2 : -referenceWidth * 2;
+    setMargins((current) => Object.fromEntries(
+      Object.entries(current).map(([type, x]) => [
+        type,
+        isOnCallingPage(x, referenceWidth) ? x + delta : x,
+      ])
+    ));
+    setNotesPageSide(nextSide);
+    setCallingPageSide(nextSide);
+    setSelectedCueId(null);
+    setFadeStart(null);
+    setBlockStart(null);
+    markDirty();
+  };
+
+  const setCallingPageEnabled = (enabled) => {
+    if (!enabled && callingPageHasCues) {
+      alert("The calling page cannot be disabled while cues are placed on it. Move or remove those cues first.");
+      return;
+    }
+    if (!enabled) {
+      setMargins({
+        SFX: 150,
+        TM: 100,
+        DCA: 50,
+      });
+    }
+    setNotesPageSide(enabled ? callingPageSide : "off");
+    setSelectedCueId(null);
+    setFadeStart(null);
+    setBlockStart(null);
+    markDirty();
+  };
+
   return (
     <div className="app-shell">
       <main className="editor-main">
@@ -1449,6 +1582,31 @@ export default function App() {
             <h2>Tool Options</h2>
             <button onClick={() => setShowOptionsDrawer(false)} aria-label="Close options">×</button>
           </div>
+          <section className="calling-page-options">
+            <h3>Calling Page</h3>
+            <label>
+              <span>Enable calling page</span>
+              <input
+                type="checkbox"
+                checked={notesPageSide !== "off"}
+                onChange={(e) => setCallingPageEnabled(e.target.checked)}
+              />
+            </label>
+            <label className={notesPageSide === "off" ? "is-disabled" : ""}>
+              <span>Calling page side</span>
+              <select
+                value={callingPageSide}
+                disabled={notesPageSide === "off"}
+                onChange={(e) => moveCallingPageTo(e.target.value)}
+              >
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+            {callingPageHasCues && (
+              <small>Move or remove calling-page cues before disabling this page.</small>
+            )}
+          </section>
           <div className="cue-options-accordion">
             {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type }) => {
               const isExpanded = expandedCueType === type;
@@ -1818,15 +1976,29 @@ export default function App() {
         )}
 
         <div className={`pdf-pages pdf-pages--${pageLayout}`}>
-        {pages.map((p, pageIndex) => (
+        {pages.map((p, pageIndex) => {
+          const documentOffset = notesPageSide === "left" ? p.width : 0;
+          const combinedWidth = notesPageSide === "off" ? p.width : p.width * 2;
+          return (
           <div
             key={pageIndex}
-            className="pdf-page"
+            className={`pdf-page${notesPageSide !== "off" ? " pdf-page--combined" : ""}`}
             style={{
-              width: `${p.width * displayScale}px`,
+              width: `${combinedWidth * displayScale}px`,
               height: `${p.height * displayScale}px`,
             }}
           >
+            {notesPageSide !== "off" && (
+              <div
+                className="pdf-notes-surface"
+                style={{
+                  position: "absolute",
+                  left: `${(notesPageSide === "left" ? 0 : p.width) * displayScale}px`,
+                  width: `${p.width * displayScale}px`,
+                  height: "100%",
+                }}
+              />
+            )}
             <div
               ref={(el) => {
                 if (!el) return;
@@ -1835,13 +2007,19 @@ export default function App() {
                 p.canvas.style.height = "100%";
                 if (el.firstChild !== p.canvas) el.replaceChildren(p.canvas);
               }}
-              style={{ width: "100%", height: "100%" }}
+              style={{
+                position: "absolute",
+                left: `${documentOffset * displayScale}px`,
+                width: `${p.width * displayScale}px`,
+                height: "100%",
+              }}
             />
 
             <svg
-              width={p.width}
+              data-coordinate-offset={documentOffset}
+              width={combinedWidth}
               height={p.height}
-              viewBox={`0 0 ${p.width} ${p.height}`}
+              viewBox={`0 0 ${combinedWidth} ${p.height}`}
               style={{
                 position: "absolute",
                 top: 0,
@@ -1859,16 +2037,17 @@ export default function App() {
                 if (e.target !== e.currentTarget) return;
 
                 const rect = e.currentTarget.getBoundingClientRect();
-                const scaleX = p.width / rect.width;
+                const scaleX = combinedWidth / rect.width;
                 const scaleY = p.height / rect.height;
 
                 addCue(
                   pageIndex,
-                  (e.clientX - rect.left) * scaleX,
+                  (e.clientX - rect.left) * scaleX - documentOffset,
                   (e.clientY - rect.top) * scaleY
                 );
               }}
             >
+              <g transform={`translate(${documentOffset} 0)`}>
               {cues
                 .filter((c) => c.page === pageIndex && !hiddenCueTypes[c.type])
                 .map((cue) => {
@@ -2204,7 +2383,8 @@ export default function App() {
 
                       const move = (ev) => {
                         const scaleX = svg.viewBox.baseVal.width / rect.width;
-                        const newX = (ev.clientX - rect.left) * scaleX;
+                        const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+                        const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
 
                         setMargins((m) => ({
                           ...m,
@@ -2229,9 +2409,20 @@ export default function App() {
                   />
                 </g>
               ))}
+              </g>
+              <line
+                x1={p.width}
+                y1={0}
+                x2={p.width}
+                y2={p.height}
+                stroke="#7b8794"
+                strokeWidth={notesPageSide === "off" ? 0 : 1.5}
+                pointerEvents="none"
+              />
             </svg>
           </div>
-        ))}
+          );
+        })}
         </div>
       </main>
 
@@ -2387,7 +2578,16 @@ export default function App() {
               <br />
 
               <small>
-                Page {cue.page + 1}
+                Page {cue.page + 1}{(() => {
+                  const anchorX = cue.left ?? cue.x;
+                  const width = pages[cue.page]?.width;
+                  const marginX = isMarginCue(cue.type) ? margins[cue.type] : null;
+                  const hasCallingContent = width && (
+                    anchorX < 0 || anchorX > width
+                    || (typeof marginX === "number" && (marginX < 0 || marginX > width))
+                  );
+                  return hasCallingContent ? " · Calling" : "";
+                })()}
               </small>
             </div>
           ))}
