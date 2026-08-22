@@ -148,3 +148,7 @@ export async function readAutosaveProject() {
   if (!project) throw new Error("No autosave exists");
   return { path: AUTOSAVE_KEY, project };
 }
+
+export async function clearAutosaveProject() {
+  await accessAutosaveStore("readwrite", (store) => store.delete(AUTOSAVE_KEY));
+}

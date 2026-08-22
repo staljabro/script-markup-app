@@ -26,6 +26,7 @@ import { usePdfRenderer } from "./hooks/usePdfRenderer";
 import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
+  clearAutosaveProject,
   choosePdfFile,
   chooseProjectFile,
   readAutosaveProject,
@@ -117,6 +118,8 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [showCueFilters, setShowCueFilters] = useState(false);
   const [selectedCueId, setSelectedCueId] = useState(null);
+  const [editingCueId, setEditingCueId] = useState(null);
+  const [cueNameDraft, setCueNameDraft] = useState("");
   const [fadeStart, setFadeStart] = useState(null);
   const [blockStart, setBlockStart] = useState(null);
 
@@ -145,6 +148,8 @@ export default function App() {
   const cueRefs = useRef({});
   const dirtyRef = useRef(false);
   const autosaveStateRef = useRef(null);
+  const restoreAttemptedRef = useRef(false);
+  const loadProjectDataRef = useRef(null);
   const toolToolbarRef = useRef(null);
 
   useEffect(() => {
@@ -260,6 +265,9 @@ export default function App() {
     setBlockStart(null);
     setIsDirty(false);
   };
+  useEffect(() => {
+    loadProjectDataRef.current = loadProjectData;
+  });
 
   const pushUndo = (snapshot) => {
     setRedoStack([]);
@@ -328,7 +336,6 @@ export default function App() {
 
   useEffect(() => {
     autosaveStateRef.current = {
-      isDirty,
       pdfBytes,
       cues,
       margins,
@@ -338,12 +345,12 @@ export default function App() {
       hiddenCueTypes,
       documentName,
     };
-  }, [isDirty, pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
 
   useEffect(() => {
-    const timer = setInterval(async () => {
+    const saveSession = async () => {
       const latest = autosaveStateRef.current;
-      if (!latest?.isDirty || !latest.pdfBytes) return;
+      if (!latest?.pdfBytes) return;
 
       try {
         const project = {
@@ -366,9 +373,41 @@ export default function App() {
       } catch (err) {
         console.error("Autosave failed:", err);
       }
-    }, 5 * 60 * 1000);
+    };
 
-    return () => clearInterval(timer);
+    const timer = setTimeout(saveSession, 2000);
+    const saveWhenHidden = () => {
+      if (document.visibilityState === "hidden") saveSession();
+    };
+    document.addEventListener("visibilitychange", saveWhenHidden);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", saveWhenHidden);
+    };
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+
+    const restorePreviousSession = async () => {
+      try {
+        const { project } = await readAutosaveProject();
+        await loadProjectDataRef.current(project);
+        setCurrentProjectPath(null);
+        setIsDirty(true);
+        setLastAutosave(project.savedAt
+          ? new Date(project.savedAt).toLocaleTimeString()
+          : "Recovered");
+      } catch (err) {
+        if (err?.message !== "No autosave exists") {
+          console.error("Session restore failed:", err);
+        }
+      }
+    };
+
+    restorePreviousSession();
   }, []);
 
   useEffect(() => {
@@ -469,7 +508,7 @@ export default function App() {
     return true;
   };
 
-  const removePdf = () => {
+  const removePdf = async () => {
     if (!pdfBytes) return false;
     if (isDirty && !window.confirm("Remove this PDF and discard its unsaved cues?")) return false;
 
@@ -483,6 +522,8 @@ export default function App() {
     setFadeStart(null);
     setBlockStart(null);
     setIsDirty(false);
+    await clearAutosaveProject();
+    setLastAutosave(null);
     return true;
   };
 
@@ -608,6 +649,7 @@ export default function App() {
   const updateCue = (id) => {
     const cue = cues.find((c) => c.id === id);
     if (!cue) return;
+    setSelectedCueId(null);
 
     const newLabel = prompt("Edit Cue:", cue.label);
     if (newLabel === null) return;
@@ -713,6 +755,48 @@ export default function App() {
     window.addEventListener("mouseup", up);
   };
 
+  const startDragDcaCue = (e, cueId) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const startSnapshot = cues.map((cue) => ({ ...cue }));
+    const svg = e.currentTarget.ownerSVGElement;
+    const rect = svg.getBoundingClientRect();
+    const startClientY = e.clientY;
+    let didMove = false;
+
+    const move = (ev) => {
+      if (Math.abs(ev.clientY - startClientY) > 2) didMove = true;
+
+      const scaleY = svg.viewBox.baseVal.height / rect.height;
+      const newY = Math.max(
+        0,
+        Math.min(svg.viewBox.baseVal.height, (ev.clientY - rect.top) * scaleY)
+      );
+
+      setCues((prev) =>
+        prev.map((cue) => cue.id === cueId ? { ...cue, y: newY } : cue)
+      );
+    };
+
+    const up = () => {
+      if (didMove) {
+        pushUndo(startSnapshot);
+        markDirty();
+        suppressNextSvgClickRef.current = true;
+        setTimeout(() => {
+          suppressNextSvgClickRef.current = false;
+        }, 0);
+      }
+
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   const startDragFade = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
@@ -727,8 +811,6 @@ export default function App() {
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     let didMove = false;
-
-    setSelectedCueId(cueId);
 
     const move = (event) => {
       const dx = (event.clientX - startClientX) * scaleX;
@@ -771,8 +853,6 @@ export default function App() {
     const svg = e.currentTarget.ownerSVGElement;
     const rect = svg.getBoundingClientRect();
     let didMove = false;
-
-    setSelectedCueId(cueId);
 
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
@@ -817,8 +897,6 @@ export default function App() {
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
-    setSelectedCueId(cueId);
-
     const move = (event) => {
       const dx = (event.clientX - startX) * scaleX;
       const dy = (event.clientY - startY) * scaleY;
@@ -854,8 +932,6 @@ export default function App() {
     const svg = e.currentTarget.ownerSVGElement;
     const rect = svg.getBoundingClientRect();
     let moved = false;
-    setSelectedCueId(cueId);
-
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
@@ -1094,6 +1170,15 @@ export default function App() {
     });
   };
 
+  const selectCueFromClick = (e, cueId) => {
+    e.stopPropagation();
+    if (suppressNextSvgClickRef.current) {
+      suppressNextSvgClickRef.current = false;
+      return;
+    }
+    setSelectedCueId(cueId);
+  };
+
   const filteredCues = cues
     .filter((cue) => {
       if (!cueTypeFilters[cue.type]) return false;
@@ -1221,6 +1306,23 @@ export default function App() {
       markDirty();
     }
     setIsEditingDocumentName(false);
+  };
+
+  const beginEditingCueName = (cue) => {
+    setCueNameDraft(cue.label);
+    setEditingCueId(cue.id);
+  };
+
+  const commitCueName = (cue) => {
+    const nextName = cueNameDraft.trim() || cue.label;
+    if (nextName !== cue.label) {
+      pushUndo(cues);
+      setCues((current) => current.map((item) =>
+        item.id === cue.id ? { ...item, label: nextName } : item
+      ));
+      markDirty();
+    }
+    setEditingCueId(null);
   };
 
   const runFileAction = async (actionName, action) => {
@@ -1789,10 +1891,7 @@ export default function App() {
                       <g
                         key={cue.id}
                         ref={(el) => { cueRefs.current[cue.id] = el; }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCueId(cue.id);
-                        }}
+                        onClick={(e) => selectCueFromClick(e, cue.id)}
                       >
                         <rect
                           x={cue.left}
@@ -1870,10 +1969,7 @@ export default function App() {
                       <g
                         key={cue.id}
                         ref={(el) => { cueRefs.current[cue.id] = el; }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCueId(cue.id);
-                        }}
+                        onClick={(e) => selectCueFromClick(e, cue.id)}
                       >
                         <line
                           x1={cue.x}
@@ -1966,10 +2062,7 @@ export default function App() {
                         stroke={selectedCueId === cue.id ? "yellow" : "none"}
                         strokeWidth={selectedCueId === cue.id ? 3 : 0}
                         style={{ cursor: "grab", userSelect: "none" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCueId(cue.id);
-                        }}
+                        onClick={(e) => selectCueFromClick(e, cue.id)}
                         onMouseDown={(e) => startDragFreeCue(e, cue.id)}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
@@ -1989,10 +2082,7 @@ export default function App() {
                       ref={(el) => {
                         cueRefs.current[cue.id] = el;
                       }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedCueId(cue.id);
-                      }}
+                      onClick={(e) => selectCueFromClick(e, cue.id)}
                     >
                       {hasLines(cue.type) && (
                         <>
@@ -2044,7 +2134,13 @@ export default function App() {
                         fill={color}
                         fontWeight="bold"
                         fontSize={cueStyle.textSize}
-                        style={{ cursor: "text", userSelect: "none" }}
+                        style={{
+                          cursor: cue.type === "DCA" ? "ns-resize" : "text",
+                          userSelect: "none",
+                        }}
+                        onMouseDown={cue.type === "DCA"
+                          ? (e) => startDragDcaCue(e, cue.id)
+                          : undefined}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           updateCue(cue.id);
@@ -2238,9 +2334,15 @@ export default function App() {
           </div>
 
           {filteredCues.map((cue) => (
-            <button
+            <div
               key={cue.id}
               onClick={() => jumpToCue(cue)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === "Enter" || e.key === " ") jumpToCue(cue);
+              }}
+              role="button"
+              tabIndex={0}
               className={`cue-list-item${selectedCueId === cue.id ? " is-selected" : ""}${hiddenCueTypes[cue.type] ? " is-hidden" : ""}`}
               style={{
                 "--cue-color": colors[cue.type],
@@ -2253,14 +2355,41 @@ export default function App() {
               >
                 {getCueTypeAbbreviation(cue.type)}
               </strong>{" "}
-              {cue.label}
+              {editingCueId === cue.id ? (
+                <input
+                  className="cue-name-editor"
+                  aria-label={`Rename ${getCueTypeName(cue.type)} cue`}
+                  value={cueNameDraft}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => setCueNameDraft(e.target.value)}
+                  onBlur={() => commitCueName(cue)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") commitCueName(cue);
+                    if (e.key === "Escape") setEditingCueId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  className="cue-name-display"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    beginEditingCueName(cue);
+                  }}
+                  title="Rename cue"
+                >
+                  <span>{cue.label}</span>
+                  <MaterialIcon path={mdiPencil} />
+                </button>
+              )}
 
               <br />
 
               <small>
                 Page {cue.page + 1}
               </small>
-            </button>
+            </div>
           ))}
         </aside>
       )}
