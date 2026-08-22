@@ -446,7 +446,12 @@ export default function App() {
   }, []);
 
   const openPdfNative = async () => {
-    if (isDirty && !window.confirm("Open another PDF and discard unsaved changes?")) return false;
+    if (pdfBytes) {
+      const message = isDirty
+        ? "You have unsaved changes. Loading a new PDF will replace the current PDF and remove its cues. Have you saved your changes?"
+        : "Loading a new PDF will replace the current PDF and remove its cues. Do you want to continue?";
+      if (!window.confirm(message)) return false;
+    }
     const selected = await choosePdfFile();
     if (!selected) return false;
 
@@ -1726,7 +1731,7 @@ export default function App() {
                 p.canvas.style.display = "block";
                 p.canvas.style.width = "100%";
                 p.canvas.style.height = "100%";
-                if (!el.hasChildNodes()) el.appendChild(p.canvas);
+                if (el.firstChild !== p.canvas) el.replaceChildren(p.canvas);
               }}
               style={{ width: "100%", height: "100%" }}
             />
