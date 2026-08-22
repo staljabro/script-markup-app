@@ -376,12 +376,19 @@ input[type="range"] { accent-color: #3d63dd; }
 
 .options-drawer .cue-option-trigger.is-expanded { background: #eef8f7; }
 
-.cue-option-dot {
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--cue-color);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cue-color) 18%, transparent);
+.cue-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--cue-color);
+}
+
+.cue-option-icon svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
 }
 
 .cue-option-name { display: inline-flex; align-items: baseline; gap: 7px; }
@@ -787,14 +794,15 @@ input[type="range"] { accent-color: #3d63dd; }
 .cue-list-item {
   display: block;
   width: 100%;
-  margin-bottom: 6px;
-  padding: 9px 10px 9px 12px;
+  margin-bottom: 4px;
+  padding: 5px 8px 5px 10px;
   border: 1px solid #e0e3e9;
   border-left: 4px solid var(--cue-color);
   border-radius: 8px;
   background: #fff;
   color: #202938;
   text-align: left;
+  line-height: 1.15;
 }
 
 .cue-list-item:hover:not(:disabled) {
@@ -829,7 +837,10 @@ input[type="range"] { accent-color: #3d63dd; }
   background: #f0f3f4;
 }
 
-.cue-list-item small { color: #7a8393; }
+.cue-list-item small {
+  color: #7a8393;
+  font-size: 10px;
+}
 
 .cue-name-display {
   display: inline-flex;
@@ -840,6 +851,168 @@ input[type="range"] { accent-color: #3d63dd; }
   background: transparent;
   color: inherit;
   font: inherit;
+}
+
+.pdf-notes-surface {
+  background-color: #fff;
+}
+
+.calling-page-options {
+  margin: 0;
+  padding: 14px;
+  border-top: 1px solid #e2e8ea;
+  background: #f4f7f8;
+}
+
+.calling-page-section { margin-bottom: 8px; }
+.decoration-section { margin-bottom: 8px; }
+
+.decoration-options {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-top: 1px solid #e2e8ea;
+  background: #f4f7f8;
+}
+
+.decoration-options > label,
+.decoration-group > label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.decoration-group {
+  padding-top: 10px;
+  border-top: 1px solid #d8dfe2;
+}
+
+.calling-page-options h3 { margin: 0 0 9px; }
+
+.calling-page-options label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+}
+
+.calling-page-options label.is-disabled { opacity: 0.5; }
+
+.calling-page-options select {
+  min-width: 88px;
+  padding: 5px 7px;
+}
+
+.calling-page-options small {
+  display: block;
+  margin-top: 7px;
+  color: #9a5219;
+  line-height: 1.35;
+}
+
+.divider-options {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #d8dfe2;
+}
+
+.divider-options.is-disabled { opacity: 0.5; }
+
+.divider-options-heading,
+.divider-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.divider-list-item.is-selected {
+  margin-inline: -5px;
+  padding-inline: 5px;
+  border-radius: 5px;
+  background: #fff3bf;
+}
+
+.divider-list-item button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.divider-list-item > button:last-child {
+  min-width: 28px;
+  padding: 2px 7px;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.divider-options-heading { margin-bottom: 4px; }
+
+.divider-options-heading button,
+.divider-list-item button {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.divider-width-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 205px;
+  gap: 10px;
+  padding-inline: 8px 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.divider-width-control input {
+  width: 135px;
+  flex: 0 0 135px;
+}
+
+.divider-width-control output {
+  width: 3ch;
+  flex: 0 0 3ch;
+  text-align: right;
+}
+
+.divider-list-item {
+  margin-top: 5px;
+  padding: 5px 0 0;
+  border-top: 1px solid #e0e5e8;
+  font-size: 12px;
+}
+
+.divider-list-item small {
+  color: #78838d;
+  font-size: 10px;
+}
+
+.header-name-display {
+  min-width: 0;
+  max-width: 145px;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-name-editor {
+  min-width: 0;
+  width: 145px;
+  padding: 3px 5px;
+}
+
+.reset-decorations-button {
+  width: 100%;
+  margin-top: 3px;
+  border-color: #c87979;
+  color: #8a2828;
 }
 
 .cue-name-display:hover:not(:disabled) {

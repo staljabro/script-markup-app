@@ -13,9 +13,11 @@ import {
   mdiFolderOpenOutline,
   mdiEye,
   mdiFormatListBulletedSquare,
+  mdiFormatPageSplit,
   mdiMarker,
   mdiMinusBoxOutline,
   mdiNoteTextOutline,
+  mdiPageNextOutline,
   mdiPencil,
   mdiPlusBoxOutline,
   mdiSineWave,
@@ -50,6 +52,16 @@ const getCueTypeOptionLabel = (type) =>
   type === "TM" ? "SCENE" : type;
 const getCueTypeAbbreviation = (type) => (type === "TM" ? "SCENE" : type);
 const FADE_TEXT_PADDING = 14;
+const isUnitPosition = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+let fallbackIdSequence = 0;
+const createId = () => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  fallbackIdSequence += 1;
+  return `${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
 const getFadeTextPosition = (cue, textSize) => ({
   x: cue.x,
   y: cue.y2 < cue.y
@@ -125,6 +137,23 @@ export default function App() {
 
   const [showCueList, setShowCueList] = useState(true);
   const [pageLayout, setPageLayout] = useState("single");
+  const [notesPageSide, setNotesPageSide] = useState("off");
+  const [callingPageSide, setCallingPageSide] = useState("left");
+  const [dividers, setDividers] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [dividersLocked, setDividersLocked] = useState(false);
+  const [selectedDividerId, setSelectedDividerId] = useState(null);
+  const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [editingHeaderId, setEditingHeaderId] = useState(null);
+  const [headerTextDraft, setHeaderTextDraft] = useState("");
+  const [dividerAppearance, setDividerAppearance] = useState({
+    color: "#000000",
+    lineWidth: 1.5,
+  });
+  const [headerAppearance, setHeaderAppearance] = useState({
+    color: "#000000",
+    textSize: 25,
+  });
   const [displayScale, setDisplayScale] = useState(1);
   const [documentName, setDocumentName] = useState("Untitled");
   const [documentNameDraft, setDocumentNameDraft] = useState("Untitled");
@@ -134,6 +163,8 @@ export default function App() {
   const [showOptionsDrawer, setShowOptionsDrawer] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [expandedCueType, setExpandedCueType] = useState("SFX");
+  const [showCallingPageOptions, setShowCallingPageOptions] = useState(false);
+  const [showDecorationOptions, setShowDecorationOptions] = useState(false);
 
   const [cueTypeFilters, setCueTypeFilters] = useState(() =>
     Object.fromEntries(
@@ -227,6 +258,14 @@ export default function App() {
       blockAppearance,
       documentName,
       hiddenCueTypes,
+      notesPageSide,
+      callingPageSide,
+      dividers: dividers.filter((divider) => isUnitPosition(divider.position)),
+      headers: headers.filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)),
+      dividersLocked,
+      dividerAppearance,
+      headerAppearance,
+      combinedNotesCanvas: true,
     };
   };
 
@@ -260,6 +299,23 @@ export default function App() {
       ...current,
       ...(project.hiddenCueTypes || {}),
     }));
+    setNotesPageSide(project.notesPageSide || "off");
+    setCallingPageSide(project.notesPageSide && project.notesPageSide !== "off"
+      ? project.notesPageSide
+      : (project.callingPageSide || "left"));
+    setDividers((project.dividers || []).map((divider) => ({ surface: "calling", ...divider })));
+    setHeaders(project.headers || []);
+    setDividersLocked(Boolean(project.dividersLocked));
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
+    setDividerAppearance((current) => ({
+      ...current,
+      ...(project.dividerAppearance || {}),
+    }));
+    setHeaderAppearance((current) => ({
+      ...current,
+      ...(project.headerAppearance || {}),
+    }));
     setSelectedCueId(null);
     setFadeStart(null);
     setBlockStart(null);
@@ -268,6 +324,26 @@ export default function App() {
   useEffect(() => {
     loadProjectDataRef.current = loadProjectData;
   });
+
+  useEffect(() => {
+    if (!pages.length || !cues.some((cue) => cue.surface)) return;
+    const migration = setTimeout(() => {
+      setCues((current) => current.map((cue) => {
+        if (!cue.surface) return cue;
+        const pageWidth = pages[cue.page]?.width || 0;
+        const offset = cue.surface === "notes"
+          ? (notesPageSide === "left" ? -pageWidth : pageWidth)
+          : 0;
+        const shifted = { ...cue };
+        for (const key of ["x", "x2", "left", "right"]) {
+          if (typeof shifted[key] === "number") shifted[key] += offset;
+        }
+        delete shifted.surface;
+        return shifted;
+      }));
+    }, 0);
+    return () => clearTimeout(migration);
+  }, [pages, cues, notesPageSide]);
 
   const pushUndo = (snapshot) => {
     setRedoStack([]);
@@ -313,6 +389,7 @@ export default function App() {
     if (!savedName) return false;
     setCurrentProjectPath(savedName);
     setIsDirty(false);
+    alert(`Project saved successfully as "${savedName}".`);
 
     return true;
   };
@@ -330,6 +407,7 @@ export default function App() {
     setCurrentProjectPath(fileName);
 
     setIsDirty(false);
+    alert(`Project saved successfully as "${fileName}".`);
 
     return true;
   };
@@ -344,8 +422,15 @@ export default function App() {
       blockAppearance,
       hiddenCueTypes,
       documentName,
+      notesPageSide,
+      callingPageSide,
+      dividers,
+      headers,
+      dividersLocked,
+      dividerAppearance,
+      headerAppearance,
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     const saveSession = async () => {
@@ -365,6 +450,14 @@ export default function App() {
           blockAppearance: latest.blockAppearance,
           hiddenCueTypes: latest.hiddenCueTypes,
           documentName: latest.documentName,
+          notesPageSide: latest.notesPageSide,
+          callingPageSide: latest.callingPageSide,
+          dividers: latest.dividers.filter((divider) => isUnitPosition(divider.position)),
+          headers: latest.headers.filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)),
+          dividersLocked: latest.dividersLocked,
+          dividerAppearance: latest.dividerAppearance,
+          headerAppearance: latest.headerAppearance,
+          combinedNotesCanvas: true,
         };
 
         const path = await writeAutosaveProject(project);
@@ -385,7 +478,7 @@ export default function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     if (restoreAttemptedRef.current) return;
@@ -433,7 +526,24 @@ export default function App() {
         return;
       }
 
-      if (e.key === "Delete" && selectedCueId) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedHeaderId && !dividersLocked) {
+        e.preventDefault();
+        setHeaders((current) => current.filter((header) => header.id !== selectedHeaderId));
+        setSelectedHeaderId(null);
+        markDirty();
+        return;
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedDividerId && !dividersLocked) {
+        e.preventDefault();
+        setDividers((current) => current.filter((divider) => divider.id !== selectedDividerId));
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
+        markDirty();
+        return;
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedCueId) {
         e.preventDefault();
 
         pushUndo(cues);
@@ -441,12 +551,16 @@ export default function App() {
 
         setCues((prev) => prev.filter((cue) => cue.id !== selectedCueId));
         setSelectedCueId(null);
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
         return;
       }
 
       if (e.key === "Escape") {
         e.preventDefault();
         setSelectedCueId(null);
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
         setFadeStart(null);
         setBlockStart(null);
         setMode("POINTER");
@@ -472,7 +586,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undoStack, redoStack, cues, selectedCueId]);
+  }, [undoStack, redoStack, cues, selectedCueId, selectedDividerId, selectedHeaderId, dividersLocked]);
 
   useEffect(() => {
     const warnBeforeUnload = (event) => {
@@ -497,6 +611,11 @@ export default function App() {
     await loadPdf(selected.file);
 
     setCues([]);
+    setDividers([]);
+    setHeaders([]);
+    setDividersLocked(false);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setUndoStack([]);
     setRedoStack([]);
     setDocumentName(selected.file.name.replace(/\.pdf$/i, "") || "Untitled");
@@ -514,6 +633,11 @@ export default function App() {
 
     clearPdf();
     setCues([]);
+    setDividers([]);
+    setHeaders([]);
+    setDividersLocked(false);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setUndoStack([]);
     setRedoStack([]);
     setDocumentName("Untitled");
@@ -566,10 +690,14 @@ export default function App() {
   const addCue = (pageIndex, x, y) => {
     if (mode === "POINTER") {
       setSelectedCueId(null);
+      setSelectedDividerId(null);
+      setSelectedHeaderId(null);
       setFadeStart(null);
       setBlockStart(null);
       return;
     }
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
 
     if (mode === "FADE") {
       if (!fadeStart || fadeStart.page !== pageIndex) {
@@ -585,7 +713,7 @@ export default function App() {
       setCues((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           page: pageIndex,
           x: start.x,
           y: start.y,
@@ -612,7 +740,7 @@ export default function App() {
       setCues((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           page: pageIndex,
           left: Math.min(start.x, x),
           top: Math.min(start.y, y),
@@ -632,11 +760,12 @@ export default function App() {
 
     pushUndo(cues);
     markDirty();
+    setSelectedDividerId(null);
 
     setCues((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: createId(),
         page: pageIndex,
         x,
         y,
@@ -681,7 +810,8 @@ export default function App() {
 
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const newX = (ev.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
       const newY = (ev.clientY - rect.top) * scaleY;
 
       setCues((prev) =>
@@ -728,7 +858,8 @@ export default function App() {
 
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const newX = (ev.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
       const newY = (ev.clientY - rect.top) * scaleY;
 
       setCues((prev) =>
@@ -857,7 +988,8 @@ export default function App() {
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const nextX = (event.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const nextX = (event.clientX - rect.left) * scaleX - coordinateOffset;
       const nextY = (event.clientY - rect.top) * scaleY;
       didMove = true;
 
@@ -935,7 +1067,8 @@ export default function App() {
     const move = (event) => {
       const scaleX = svg.viewBox.baseVal.width / rect.width;
       const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const nextX = (event.clientX - rect.left) * scaleX;
+      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+      const nextX = (event.clientX - rect.left) * scaleX - coordinateOffset;
       const nextY = (event.clientY - rect.top) * scaleY;
       moved = true;
       setCues((current) => current.map((cue) => {
@@ -972,16 +1105,38 @@ export default function App() {
 
     try {
       const pdfDoc = await PDFDocument.load(new Uint8Array(pdfBytes));
+      if (notesPageSide !== "off") {
+        for (let pageIndex = pdfDoc.getPageCount() - 1; pageIndex >= 0; pageIndex -= 1) {
+          const { width, height } = pdfDoc.getPage(pageIndex).getSize();
+          const insertAt = notesPageSide === "left" ? pageIndex : pageIndex + 1;
+          pdfDoc.insertPage(insertAt, [width, height]);
+        }
+      }
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
       cues.forEach((cue) => {
         if (hiddenCueTypes[cue.type]) return;
-        const page = pdfDoc.getPage(cue.page);
         const pageInfo = pages[cue.page];
 
         if (!pageInfo) return;
 
-        const viewport = pageInfo.viewport;
+        const documentPageIndex = notesPageSide === "off"
+          ? cue.page
+          : cue.page * 2 + (notesPageSide === "left" ? 1 : 0);
+        const targets = [{ pageIndex: documentPageIndex, xOffset: 0 }];
+        if (notesPageSide !== "off") {
+          targets.push({
+            pageIndex: cue.page * 2 + (notesPageSide === "left" ? 0 : 1),
+            xOffset: notesPageSide === "left" ? pageInfo.width : -pageInfo.width,
+          });
+        }
+
+        targets.forEach(({ pageIndex: targetPageIndex, xOffset }) => {
+        const page = pdfDoc.getPage(targetPageIndex);
+        const baseViewport = pageInfo.viewport;
+        const viewport = {
+          convertToPdfPoint: (x, y) => baseViewport.convertToPdfPoint(x + xOffset, y),
+        };
         const cueStyle = styles[cue.type] || { textSize: 10, lineWidth: 1.5 };
 
         const hex = colors[cue.type] || "#000000";
@@ -1126,7 +1281,67 @@ export default function App() {
           font,
           color,
         });
+        });
       });
+
+      if (dividers.length > 0 || headers.length > 0) {
+        pages.forEach((pageInfo, sourcePageIndex) => {
+          const callingPageIndex = sourcePageIndex * 2
+            + (notesPageSide === "left" ? 0 : 1);
+          const pdfPageIndex = notesPageSide === "off"
+            ? sourcePageIndex
+            : sourcePageIndex * 2 + (notesPageSide === "left" ? 1 : 0);
+          const [widthStart] = pageInfo.viewport.convertToPdfPoint(0, 0);
+          const [widthEnd] = pageInfo.viewport.convertToPdfPoint(dividerAppearance.lineWidth, 0);
+          const hex = dividerAppearance.color;
+          const dividerColor = rgb(
+            parseInt(hex.slice(1, 3), 16) / 255,
+            parseInt(hex.slice(3, 5), 16) / 255,
+            parseInt(hex.slice(5, 7), 16) / 255
+          );
+
+          dividers
+            .filter((divider) => isUnitPosition(divider.position)
+              && (divider.surface === "pdf" || notesPageSide !== "off"))
+            .forEach((divider) => {
+            const targetPage = pdfDoc.getPage(divider.surface === "pdf" ? pdfPageIndex : callingPageIndex);
+            const x = divider.position * pageInfo.width;
+            const [topX, topY] = pageInfo.viewport.convertToPdfPoint(x, 0);
+            const [bottomX, bottomY] = pageInfo.viewport.convertToPdfPoint(x, pageInfo.height);
+            targetPage.drawLine({
+              start: { x: topX, y: topY },
+              end: { x: bottomX, y: bottomY },
+              color: dividerColor,
+              thickness: Math.abs(widthEnd - widthStart),
+            });
+          });
+
+          const headerHex = headerAppearance.color;
+          const headerColor = rgb(
+            parseInt(headerHex.slice(1, 3), 16) / 255,
+            parseInt(headerHex.slice(3, 5), 16) / 255,
+            parseInt(headerHex.slice(5, 7), 16) / 255
+          );
+          headers
+            .filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)
+              && (header.surface === "pdf" || notesPageSide !== "off"))
+            .forEach((header) => {
+              const targetPage = pdfDoc.getPage(header.surface === "pdf" ? pdfPageIndex : callingPageIndex);
+              const [textX, textY] = pageInfo.viewport.convertToPdfPoint(
+                header.x * pageInfo.width,
+                header.y * pageInfo.height
+              );
+              const textWidth = font.widthOfTextAtSize(header.text, headerAppearance.textSize);
+              targetPage.drawText(header.text, {
+                x: textX - textWidth / 2,
+                y: textY - headerAppearance.textSize / 2,
+                size: headerAppearance.textSize,
+                font,
+                color: headerColor,
+              });
+            });
+        });
+      }
 
       const bytes = await pdfDoc.save();
 
@@ -1135,6 +1350,7 @@ export default function App() {
         `${getSafeProjectName(documentName)}.pdf`
       );
       if (!savedName) return false;
+      alert(`PDF exported successfully as "${savedName}".`);
       return true;
     } catch (err) {
       console.error("EXPORT ERROR:", err);
@@ -1163,6 +1379,8 @@ export default function App() {
   };
 
   const jumpToCue = (cue) => {
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setSelectedCueId(cue.id);
     cueRefs.current[cue.id]?.scrollIntoView({
       behavior: "smooth",
@@ -1176,6 +1394,8 @@ export default function App() {
       suppressNextSvgClickRef.current = false;
       return;
     }
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setSelectedCueId(cueId);
   };
 
@@ -1339,6 +1559,169 @@ export default function App() {
     }
   };
 
+  const isOnCallingPage = (x, width, side = notesPageSide) =>
+    side === "left" ? x < 0 : side === "right" ? x > width : false;
+
+  const callingPageHasCues = notesPageSide !== "off" && cues.some((cue) => {
+    const width = pages[cue.page]?.width;
+    if (!width) return false;
+    const cueCoordinates = [cue.x, cue.x2, cue.left, cue.right]
+      .filter((value) => typeof value === "number");
+    if (cueCoordinates.some((x) => isOnCallingPage(x, width))) return true;
+    return isMarginCue(cue.type) && isOnCallingPage(margins[cue.type], width);
+  });
+  const callingPageHasContent = callingPageHasCues;
+
+  const addDivider = () => {
+    const dividerId = createId();
+    setDividers((current) => [
+      ...current,
+      {
+        id: dividerId,
+        surface: notesPageSide === "off" ? "pdf" : "calling",
+        position: 0.5,
+      },
+    ]);
+    if (!dividersLocked) {
+      setSelectedCueId(null);
+      setSelectedHeaderId(null);
+      setSelectedDividerId(dividerId);
+    }
+    markDirty();
+  };
+
+  const addHeader = () => {
+    const headerId = createId();
+    setHeaders((current) => [
+      ...current,
+      {
+        id: headerId,
+        surface: notesPageSide === "off" ? "pdf" : "calling",
+        x: 0.5,
+        y: 0.08,
+        text: "Header",
+      },
+    ]);
+    if (!dividersLocked) {
+      setSelectedCueId(null);
+      setSelectedDividerId(null);
+      setSelectedHeaderId(headerId);
+    }
+    markDirty();
+  };
+
+  const removeHeader = (headerId) => {
+    if (dividersLocked) return;
+    setHeaders((current) => current.filter((header) => header.id !== headerId));
+    setSelectedHeaderId((current) => current === headerId ? null : current);
+    markDirty();
+  };
+
+  const beginEditingHeader = (header) => {
+    if (dividersLocked) return;
+    setSelectedCueId(null);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(header.id);
+    setHeaderTextDraft(header.text);
+    setEditingHeaderId(header.id);
+  };
+
+  const editHeaderWithPrompt = (header) => {
+    if (dividersLocked) return;
+    const nextText = window.prompt("Edit header:", header.text);
+    if (nextText === null || !nextText.trim()) return;
+    setHeaders((current) => current.map((item) =>
+      item.id === header.id ? { ...item, text: nextText.trim() } : item
+    ));
+    markDirty();
+  };
+
+  const commitHeaderText = (header) => {
+    const nextText = headerTextDraft.trim() || header.text;
+    if (nextText !== header.text) {
+      setHeaders((current) => current.map((item) =>
+        item.id === header.id ? { ...item, text: nextText } : item
+      ));
+      markDirty();
+    }
+    setEditingHeaderId(null);
+  };
+
+  const resetDividersAndHeaders = () => {
+    if (dividersLocked) return;
+    if (!window.confirm("Remove all dividers and headers? This cannot be undone.")) return;
+    setDividers([]);
+    setHeaders([]);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
+    setEditingHeaderId(null);
+    markDirty();
+  };
+
+  const removeDivider = (dividerId) => {
+    if (dividersLocked) return;
+    setDividers((current) => current.filter((divider) => divider.id !== dividerId));
+    setSelectedDividerId((current) => current === dividerId ? null : current);
+    markDirty();
+  };
+
+  const moveCallingPageTo = (nextSide) => {
+    if (notesPageSide === "off" || notesPageSide === nextSide) {
+      setCallingPageSide(nextSide);
+      return;
+    }
+
+    setCues((current) => current.map((cue) => {
+      const width = pages[cue.page]?.width || 0;
+      const shifted = { ...cue };
+      const delta = notesPageSide === "left" ? width * 2 : -width * 2;
+      for (const key of ["x", "x2", "left", "right"]) {
+        if (typeof shifted[key] === "number" && isOnCallingPage(shifted[key], width)) {
+          shifted[key] += delta;
+        }
+      }
+      if (shifted.type === "BLOCK" && shifted.left > shifted.right) {
+        [shifted.left, shifted.right] = [shifted.right, shifted.left];
+        shifted.x = shifted.left;
+      }
+      return shifted;
+    }));
+
+    const referenceWidth = pages[0]?.width || 0;
+    const delta = notesPageSide === "left" ? referenceWidth * 2 : -referenceWidth * 2;
+    setMargins((current) => Object.fromEntries(
+      Object.entries(current).map(([type, x]) => [
+        type,
+        isOnCallingPage(x, referenceWidth) ? x + delta : x,
+      ])
+    ));
+    setNotesPageSide(nextSide);
+    setCallingPageSide(nextSide);
+    setSelectedCueId(null);
+    setFadeStart(null);
+    setBlockStart(null);
+    markDirty();
+  };
+
+  const setCallingPageEnabled = (enabled) => {
+    if (!enabled && callingPageHasContent) {
+      alert("The Prompt/Showcall Page cannot be disabled while it contains cues or dividers. Move or remove them first.");
+      return;
+    }
+    if (!enabled) {
+      setMargins({
+        SFX: 150,
+        TM: 100,
+        DCA: 50,
+      });
+    }
+    setNotesPageSide(enabled ? callingPageSide : "off");
+    setSelectedCueId(null);
+    setFadeStart(null);
+    setBlockStart(null);
+    markDirty();
+  };
+
   return (
     <div className="app-shell">
       <main className="editor-main">
@@ -1449,8 +1832,136 @@ export default function App() {
             <h2>Tool Options</h2>
             <button onClick={() => setShowOptionsDrawer(false)} aria-label="Close options">×</button>
           </div>
+          <section className="cue-option-section calling-page-section" style={{ "--cue-color": "#374151" }}>
+            <button
+              className={`cue-option-trigger ${showCallingPageOptions ? "is-expanded" : ""}`}
+              onClick={() => {
+                const nextExpanded = !showCallingPageOptions;
+                setShowCallingPageOptions(nextExpanded);
+                setShowDecorationOptions(false);
+                setExpandedCueType(null);
+              }}
+              aria-expanded={showCallingPageOptions}
+            >
+              <span className="cue-option-icon"><MaterialIcon path={mdiPageNextOutline} /></span>
+              <span className="cue-option-name"><strong>PROMPT/SHOWCALL PAGE</strong></span>
+              <span className="cue-option-chevron">
+                <MaterialIcon path={showCallingPageOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
+              </span>
+            </button>
+            {showCallingPageOptions && <div className="calling-page-options">
+            <label className={!pdfBytes || (notesPageSide !== "off" && callingPageHasContent) ? "is-disabled" : ""}>
+              <span>Enable prompt/showcall page</span>
+              <input
+                type="checkbox"
+                checked={notesPageSide !== "off"}
+                disabled={!pdfBytes || (notesPageSide !== "off" && callingPageHasContent)}
+                onChange={(e) => setCallingPageEnabled(e.target.checked)}
+              />
+            </label>
+            <label className={notesPageSide === "off" ? "is-disabled" : ""}>
+              <span>Prompt/showcall page side</span>
+              <select
+                value={callingPageSide}
+                disabled={notesPageSide === "off"}
+                onChange={(e) => moveCallingPageTo(e.target.value)}
+              >
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </label>
+            {callingPageHasContent && (
+              <small>Move or remove prompt/showcall-page cues before disabling this page.</small>
+            )}
+            </div>}
+          </section>
+          <section className="cue-option-section decoration-section" style={{ "--cue-color": "#111827" }}>
+            <button
+              className={`cue-option-trigger ${showDecorationOptions ? "is-expanded" : ""}`}
+              onClick={() => {
+                const nextExpanded = !showDecorationOptions;
+                setShowDecorationOptions(nextExpanded);
+                setShowCallingPageOptions(false);
+                setExpandedCueType(null);
+              }}
+              aria-expanded={showDecorationOptions}
+            >
+              <span className="cue-option-icon"><MaterialIcon path={mdiFormatPageSplit} /></span>
+              <span className="cue-option-name"><strong>DIVIDERS AND HEADERS</strong></span>
+              <span className="cue-option-chevron">
+                <MaterialIcon path={showDecorationOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
+              </span>
+            </button>
+            {showDecorationOptions && <div className="decoration-options">
+              <label>
+                <span>Lock dividers and headers</span>
+                <input
+                  type="checkbox"
+                  checked={dividersLocked}
+                  onChange={(e) => {
+                    setDividersLocked(e.target.checked);
+                    if (e.target.checked) {
+                      setSelectedDividerId(null);
+                      setSelectedHeaderId(null);
+                      setEditingHeaderId(null);
+                    }
+                    markDirty();
+                  }}
+                />
+              </label>
+
+              <div className="decoration-group">
+                <div className="divider-options-heading">
+                  <strong>Dividers</strong>
+                  <button type="button" disabled={!pdfBytes} onClick={addDivider}>Add divider</button>
+                </div>
+                <label><span>Colour</span><input type="color" value={dividerAppearance.color} onChange={(e) => { setDividerAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label>
+                  <span>Line width</span>
+                  <span className="divider-width-control">
+                    <input type="range" min="0.5" max="8" step="0.5" value={dividerAppearance.lineWidth} onChange={(e) => { setDividerAppearance((current) => ({ ...current, lineWidth: parseFloat(e.target.value) })); markDirty(); }} />
+                    <output>{dividerAppearance.lineWidth}</output>
+                  </span>
+                </label>
+                {dividers.map((divider, index) => (
+                  <div className={`divider-list-item${selectedDividerId === divider.id ? " is-selected" : ""}`} key={divider.id} role={dividersLocked ? undefined : "button"} tabIndex={dividersLocked ? undefined : 0} onClick={() => { if (dividersLocked) return; setSelectedCueId(null); setSelectedHeaderId(null); setSelectedDividerId(divider.id); }}>
+                    <span>Divider {index + 1} <small>({divider.surface === "pdf" ? "PDF" : "Prompt/Showcall"})</small></span>
+                    <button type="button" aria-label={`Remove Divider ${index + 1}`} disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); removeDivider(divider.id); }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="decoration-group">
+                <div className="divider-options-heading">
+                  <strong>Headers</strong>
+                  <button type="button" disabled={!pdfBytes} onClick={addHeader}>Add header</button>
+                </div>
+                <label><span>Colour</span><input type="color" value={headerAppearance.color} onChange={(e) => { setHeaderAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label>
+                  <span>Text size</span>
+                  <span className="divider-width-control">
+                    <input type="range" min="8" max="72" step="1" value={headerAppearance.textSize} onChange={(e) => { setHeaderAppearance((current) => ({ ...current, textSize: parseFloat(e.target.value) })); markDirty(); }} />
+                    <output>{headerAppearance.textSize}</output>
+                  </span>
+                </label>
+                {headers.map((header, index) => (
+                  <div className={`divider-list-item${selectedHeaderId === header.id ? " is-selected" : ""}`} key={header.id} role={dividersLocked ? undefined : "button"} tabIndex={dividersLocked ? undefined : 0} onClick={() => { if (dividersLocked) return; setSelectedCueId(null); setSelectedDividerId(null); setSelectedHeaderId(header.id); }}>
+                    {editingHeaderId === header.id ? (
+                      <input className="header-name-editor" autoFocus value={headerTextDraft} onClick={(e) => e.stopPropagation()} onChange={(e) => setHeaderTextDraft(e.target.value)} onBlur={() => commitHeaderText(header)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commitHeaderText(header); if (e.key === "Escape") setEditingHeaderId(null); }} />
+                    ) : (
+                      <button type="button" className="header-name-display" disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); beginEditingHeader(header); }}>{header.text}</button>
+                    )}
+                    <small>{header.surface === "pdf" ? "PDF" : "Prompt/Showcall"}</small>
+                    <button type="button" aria-label={`Remove header ${index + 1}`} disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); removeHeader(header.id); }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" className="reset-decorations-button" disabled={dividersLocked || (dividers.length === 0 && headers.length === 0)} onClick={resetDividersAndHeaders}>Reset dividers and headers</button>
+            </div>}
+          </section>
           <div className="cue-options-accordion">
-            {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type }) => {
+            {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type, icon }) => {
               const isExpanded = expandedCueType === type;
               return (
                 <section className="cue-option-section" key={type} style={{ "--cue-color": colors[type] }}>
@@ -1458,12 +1969,14 @@ export default function App() {
                     className={`cue-option-trigger ${isExpanded ? "is-expanded" : ""}`}
                     onClick={() => {
                       setExpandedCueType(isExpanded ? null : type);
+                      setShowCallingPageOptions(false);
+                      setShowDecorationOptions(false);
                     }}
                     aria-expanded={isExpanded}
                   >
-                    <span className="cue-option-dot" />
+                    <span className="cue-option-icon"><MaterialIcon path={icon} /></span>
                     <span className="cue-option-name">
-                      <strong>{getCueTypeOptionLabel(type)}</strong>
+                      <strong>{getCueTypeOptionLabel(type)} CUES</strong>
                       {hiddenCueTypes[type] && <span className="hidden-status">(Hidden)</span>}
                     </span>
                     <span className="cue-option-chevron">
@@ -1743,7 +2256,7 @@ export default function App() {
                     <ol>
                       <li>Open <strong>Save / Load</strong> and select a source PDF.</li>
                       <li>Choose a tool from the toolbar beneath the header.</li>
-                      <li>Click the PDF to create cues, then adjust their appearance in <strong>Options</strong>.</li>
+                      <li>Click the document to create cues, then adjust their appearance in <strong>Options</strong>.</li>
                       <li>Save a project for later editing or export a finished PDF.</li>
                     </ol>
                   </article>
@@ -1754,7 +2267,8 @@ export default function App() {
                       <li><strong>SFX, Scene, and DCA</strong> create margin-based annotations.</li>
                       <li><strong>Note, Warn, and Mark</strong> place text directly on the page.</li>
                       <li>Select <strong>Pointer</strong> when you want to work without adding cues.</li>
-                      <li>Double-click cue text to rename it.</li>
+                      <li>Drag cues and their handles without changing the current selection.</li>
+                      <li>Rename a cue by double-clicking it on the page or editing its name in the cue list.</li>
                     </ul>
                   </article>
 
@@ -1769,12 +2283,35 @@ export default function App() {
                   </article>
 
                   <article className="help-card">
+                    <h3>Prompt/Showcall pages</h3>
+                    <ul>
+                      <li>Open <strong>Prompt/Showcall Page</strong> in Options to enable a blank page beside every PDF page.</li>
+                      <li>Choose a consistent left or right position for the whole document.</li>
+                      <li>The PDF and Prompt/Showcall page form one editing canvas, so cue lines and margins can cross the page divider.</li>
+                      <li>Switching sides preserves relative cue positions; line endpoints on the script remain in place.</li>
+                      <li>A Prompt/Showcall page containing cues cannot be disabled until those cues are moved or removed.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Dividers &amp; headers</h3>
+                    <ul>
+                      <li>Add shared vertical dividers or headers from <strong>Dividers and Headers</strong> in Options.</li>
+                      <li>Items created on a PDF or Prompt/Showcall page appear in the same position on every page of that type.</li>
+                      <li>Drag an unlocked item between the PDF and Prompt/Showcall sides. Dividers have colour and line-width controls; headers have colour and text-size controls.</li>
+                      <li>Select an item on the page or in Options. Edit header text there or by double-clicking the header on the page.</li>
+                      <li>Locking prevents moving, editing, or deleting both dividers and headers. <strong>Reset</strong> removes them all after confirmation.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
                     <h3>View &amp; visibility</h3>
                     <ul>
                       <li>Switch between stacked and side-by-side page layouts in the tool strip.</li>
                       <li>Use <strong>Scale</strong> to resize pages without changing export geometry.</li>
                       <li>Toggle the cue list from the button beside the scale control.</li>
                       <li>Hidden cue types remain saved but do not appear on pages or PDF exports.</li>
+                      <li>Only one Options accordion can be open at a time.</li>
                     </ul>
                   </article>
 
@@ -1785,6 +2322,7 @@ export default function App() {
                       <li>BLOCK additionally supports fill colour, opacity, no fill, and no line.</li>
                       <li>Search cues by name, type, or page from the cue list.</li>
                       <li>The Filter accordion controls which cue types appear in the list.</li>
+                      <li>Click a cue-list name to edit it inline; moving or editing a cue does not automatically select it.</li>
                     </ul>
                   </article>
 
@@ -1793,8 +2331,19 @@ export default function App() {
                     <ul>
                       <li><strong>Save Project</strong> downloads a timestamped project copy.</li>
                       <li><strong>Save Project As</strong> lets you choose its filename and location.</li>
-                      <li><strong>Export PDF</strong> creates an annotated PDF using visible cues.</li>
-                      <li>Autosave stores unsaved work in this browser every five minutes.</li>
+                      <li>Successful save and export actions display a confirmation.</li>
+                      <li><strong>Export PDF</strong> creates an annotated PDF using visible cues and outputs each Prompt/Showcall page as a separate page beside its source page in sequence.</li>
+                      <li>Items dragged outside their page area are omitted from saved projects and PDF exports.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Sessions &amp; replacing files</h3>
+                    <ul>
+                      <li>Your current PDF, cues, page setup, dividers, headers, and appearance settings are stored automatically in this browser.</li>
+                      <li>The previous session is restored automatically after a browser reload or return visit—no restore prompt is required.</li>
+                      <li><strong>Recover Autosave</strong> can manually reload the browser-stored copy if needed.</li>
+                      <li>Opening another PDF warns that it replaces the current PDF and cues. Remove PDF clears the document and its autosave.</li>
                     </ul>
                   </article>
                 </div>
@@ -1803,12 +2352,12 @@ export default function App() {
                   <h3>Keyboard &amp; pointer shortcuts</h3>
                   <div className="shortcut-grid">
                     <kbd>Esc</kbd><span>Cancel a pending cue, clear selection, and return to Pointer.</span>
-                    <kbd>Delete</kbd><span>Remove the selected cue.</span>
+                    <kbd>Delete / Backspace</kbd><span>Remove the selected cue, divider, or header when it is not locked.</span>
                     <kbd>Ctrl/Cmd + Z</kbd><span>Undo the last cue action.</span>
                     <kbd>Ctrl/Cmd + Shift + Z</kbd><span>Redo the last undone action.</span>
                     <kbd>Ctrl/Cmd + Y</kbd><span>Redo on Windows-style keyboards.</span>
-                    <kbd>Double-click</kbd><span>Edit a cue label, fade label, or block label.</span>
-                    <kbd>Drag</kbd><span>Move cues or adjust visible endpoint and corner handles.</span>
+                    <kbd>Double-click</kbd><span>Edit a cue, fade, block, or header label.</span>
+                    <kbd>Drag</kbd><span>Move cues, dividers, and headers, or adjust visible handles.</span>
                     <kbd>F / 7</kbd><span>Select Fade. Use B / 8 to select Block.</span>
                   </div>
                 </article>
@@ -1818,15 +2367,29 @@ export default function App() {
         )}
 
         <div className={`pdf-pages pdf-pages--${pageLayout}`}>
-        {pages.map((p, pageIndex) => (
+        {pages.map((p, pageIndex) => {
+          const documentOffset = notesPageSide === "left" ? p.width : 0;
+          const combinedWidth = notesPageSide === "off" ? p.width : p.width * 2;
+          return (
           <div
             key={pageIndex}
-            className="pdf-page"
+            className={`pdf-page${notesPageSide !== "off" ? " pdf-page--combined" : ""}`}
             style={{
-              width: `${p.width * displayScale}px`,
+              width: `${combinedWidth * displayScale}px`,
               height: `${p.height * displayScale}px`,
             }}
           >
+            {notesPageSide !== "off" && (
+              <div
+                className="pdf-notes-surface"
+                style={{
+                  position: "absolute",
+                  left: `${(notesPageSide === "left" ? 0 : p.width) * displayScale}px`,
+                  width: `${p.width * displayScale}px`,
+                  height: "100%",
+                }}
+              />
+            )}
             <div
               ref={(el) => {
                 if (!el) return;
@@ -1835,13 +2398,19 @@ export default function App() {
                 p.canvas.style.height = "100%";
                 if (el.firstChild !== p.canvas) el.replaceChildren(p.canvas);
               }}
-              style={{ width: "100%", height: "100%" }}
+              style={{
+                position: "absolute",
+                left: `${documentOffset * displayScale}px`,
+                width: `${p.width * displayScale}px`,
+                height: "100%",
+              }}
             />
 
             <svg
-              width={p.width}
+              data-coordinate-offset={documentOffset}
+              width={combinedWidth}
               height={p.height}
-              viewBox={`0 0 ${p.width} ${p.height}`}
+              viewBox={`0 0 ${combinedWidth} ${p.height}`}
               style={{
                 position: "absolute",
                 top: 0,
@@ -1859,16 +2428,169 @@ export default function App() {
                 if (e.target !== e.currentTarget) return;
 
                 const rect = e.currentTarget.getBoundingClientRect();
-                const scaleX = p.width / rect.width;
+                const scaleX = combinedWidth / rect.width;
                 const scaleY = p.height / rect.height;
 
                 addCue(
                   pageIndex,
-                  (e.clientX - rect.left) * scaleX,
+                  (e.clientX - rect.left) * scaleX - documentOffset,
                   (e.clientY - rect.top) * scaleY
                 );
               }}
             >
+              <g transform={`translate(${documentOffset} 0)`}>
+              {dividers.filter((divider) => divider.surface === "pdf" || notesPageSide !== "off").map((divider) => {
+                const dividerX = divider.surface === "pdf"
+                  ? divider.position * p.width
+                  : notesPageSide === "left"
+                    ? (divider.position - 1) * p.width
+                    : (1 + divider.position) * p.width;
+                return (
+                  <g
+                    key={divider.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked || suppressNextSvgClickRef.current) return;
+                      setSelectedCueId(null);
+                      setSelectedHeaderId(null);
+                      setSelectedDividerId(divider.id);
+                    }}
+                  >
+                    {selectedDividerId === divider.id && !dividersLocked && (
+                      <line
+                        x1={dividerX}
+                        y1={0}
+                        x2={dividerX}
+                        y2={p.height}
+                        stroke="#facc15"
+                        strokeWidth={dividerAppearance.lineWidth + 4}
+                        pointerEvents="none"
+                      />
+                    )}
+                    <line
+                      x1={dividerX}
+                      y1={0}
+                      x2={dividerX}
+                      y2={p.height}
+                      stroke={dividerAppearance.color}
+                      strokeWidth={dividerAppearance.lineWidth}
+                    />
+                    <line
+                      x1={dividerX}
+                      y1={0}
+                      x2={dividerX}
+                      y2={p.height}
+                      stroke="transparent"
+                      strokeWidth={14}
+                      style={{ cursor: dividersLocked ? "default" : "ew-resize" }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (dividersLocked) return;
+                        e.preventDefault();
+                        const svg = e.currentTarget.ownerSVGElement;
+                        const rect = svg.getBoundingClientRect();
+                        let moved = false;
+
+                        const move = (event) => {
+                          moved = true;
+                          const displayX = (event.clientX - rect.left)
+                            * (svg.viewBox.baseVal.width / rect.width);
+                          const onPdfPage = displayX >= documentOffset
+                            && displayX <= documentOffset + p.width;
+                          const surface = onPdfPage || notesPageSide === "off" ? "pdf" : "calling";
+                          const localX = surface === "pdf"
+                            ? displayX - documentOffset
+                            : notesPageSide === "left" ? displayX : displayX - p.width;
+                          const position = Math.max(0, Math.min(1, localX / p.width));
+                          setDividers((current) => current.map((item) =>
+                            item.id === divider.id ? { ...item, surface, position } : item
+                          ));
+                        };
+
+                        const up = () => {
+                          if (moved) markDirty();
+                          suppressNextSvgClickRef.current = moved;
+                          setTimeout(() => { suppressNextSvgClickRef.current = false; }, 0);
+                          window.removeEventListener("mousemove", move);
+                          window.removeEventListener("mouseup", up);
+                        };
+
+                        window.addEventListener("mousemove", move);
+                        window.addEventListener("mouseup", up);
+                      }}
+                    />
+                  </g>
+                );
+              })}
+              {headers.filter((header) => header.surface === "pdf" || notesPageSide !== "off").map((header) => {
+                const headerX = header.surface === "pdf"
+                  ? header.x * p.width
+                  : notesPageSide === "left"
+                    ? (header.x - 1) * p.width
+                    : (1 + header.x) * p.width;
+                const headerY = header.y * p.height;
+                return (
+                  <text
+                    key={header.id}
+                    x={headerX}
+                    y={headerY}
+                    fill={headerAppearance.color}
+                    fontSize={headerAppearance.textSize}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    stroke={selectedHeaderId === header.id && !dividersLocked ? "#facc15" : "none"}
+                    strokeWidth={selectedHeaderId === header.id && !dividersLocked ? 3 : 0}
+                    paintOrder="stroke"
+                    style={{ cursor: dividersLocked ? "default" : "move", userSelect: "none" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked || suppressNextSvgClickRef.current) return;
+                      setSelectedCueId(null);
+                      setSelectedDividerId(null);
+                      setSelectedHeaderId(header.id);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      editHeaderWithPrompt(header);
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked) return;
+                      e.preventDefault();
+                      const svg = e.currentTarget.ownerSVGElement;
+                      const rect = svg.getBoundingClientRect();
+                      let moved = false;
+
+                      const move = (event) => {
+                        moved = true;
+                        const displayX = (event.clientX - rect.left) * (svg.viewBox.baseVal.width / rect.width);
+                        const displayY = (event.clientY - rect.top) * (svg.viewBox.baseVal.height / rect.height);
+                        const onPdfPage = displayX >= documentOffset && displayX <= documentOffset + p.width;
+                        const surface = onPdfPage || notesPageSide === "off" ? "pdf" : "calling";
+                        const localX = surface === "pdf"
+                          ? displayX - documentOffset
+                          : notesPageSide === "left" ? displayX : displayX - p.width;
+                        const x = Math.max(0, Math.min(1, localX / p.width));
+                        const y = Math.max(0.02, Math.min(1, displayY / p.height));
+                        setHeaders((current) => current.map((item) =>
+                          item.id === header.id ? { ...item, surface, x, y } : item
+                        ));
+                      };
+
+                      const up = () => {
+                        if (moved) markDirty();
+                        suppressNextSvgClickRef.current = moved;
+                        setTimeout(() => { suppressNextSvgClickRef.current = false; }, 0);
+                        window.removeEventListener("mousemove", move);
+                        window.removeEventListener("mouseup", up);
+                      };
+                      window.addEventListener("mousemove", move);
+                      window.addEventListener("mouseup", up);
+                    }}
+                  >{header.text}</text>
+                );
+              })}
               {cues
                 .filter((c) => c.page === pageIndex && !hiddenCueTypes[c.type])
                 .map((cue) => {
@@ -2204,7 +2926,8 @@ export default function App() {
 
                       const move = (ev) => {
                         const scaleX = svg.viewBox.baseVal.width / rect.width;
-                        const newX = (ev.clientX - rect.left) * scaleX;
+                        const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
+                        const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
 
                         setMargins((m) => ({
                           ...m,
@@ -2229,9 +2952,20 @@ export default function App() {
                   />
                 </g>
               ))}
+              </g>
+              <line
+                x1={p.width}
+                y1={0}
+                x2={p.width}
+                y2={p.height}
+                stroke="#7b8794"
+                strokeWidth={notesPageSide === "off" ? 0 : 1.5}
+                pointerEvents="none"
+              />
             </svg>
           </div>
-        ))}
+          );
+        })}
         </div>
       </main>
 
@@ -2387,7 +3121,16 @@ export default function App() {
               <br />
 
               <small>
-                Page {cue.page + 1}
+                Page {cue.page + 1}{(() => {
+                  const anchorX = cue.left ?? cue.x;
+                  const width = pages[cue.page]?.width;
+                  const marginX = isMarginCue(cue.type) ? margins[cue.type] : null;
+                  const hasCallingContent = width && (
+                    anchorX < 0 || anchorX > width
+                    || (typeof marginX === "number" && (marginX < 0 || marginX > width))
+                  );
+                  return hasCallingContent ? " · Prompt/Showcall" : "";
+                })()}
               </small>
             </div>
           ))}
