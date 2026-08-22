@@ -1,8 +1,11 @@
 import { useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker?url";
+import PdfWorker from "pdfjs-dist/build/pdf.worker?worker&inline";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+// Keep the PDF.js worker inside the application bundle. This avoids relying on
+// the hosting server or reverse proxy to provide the correct MIME type for a
+// separately emitted .mjs worker file.
+pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
 
 const PDF_SCALE = 1.2;
 
