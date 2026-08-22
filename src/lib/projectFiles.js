@@ -1,158 +1,150 @@
-import { open, save } from "@tauri-apps/plugin-dialog";
-import {
-  create,
-  mkdir,
-  readFile,
-} from "@tauri-apps/plugin-fs";
-import { Store } from "@tauri-apps/plugin-store";
-import { appDataDir, join } from "@tauri-apps/api/path";
+const AUTOSAVE_KEY = "script-markup-autosave";
+const AUTOSAVE_DB = "script-markup";
 
-const RECENT_PROJECTS_KEY = "recentProjects";
-const RECENT_PROJECTS_LIMIT = 10;
-const AUTOSAVE_FILE_NAME = "autosave.cueproj";
+function openAutosaveDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(AUTOSAVE_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("projects");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
 
-let settingsStore = null;
+async function accessAutosaveStore(mode, operation) {
+  const db = await openAutosaveDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("projects", mode);
+    const request = operation(transaction.objectStore("projects"));
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => db.close();
+  });
+}
+
+function chooseFile(accept) {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });
+    input.click();
+  });
+}
+
+function downloadFile(contents, fileName, type) {
+  const blob = contents instanceof Blob ? contents : new Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
 
 export function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = "";
-
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
-
   return window.btoa(binary);
 }
 
 export function base64ToArrayBuffer(base64) {
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
-
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;
 }
 
-async function getStore() {
-  if (!settingsStore) {
-    settingsStore = await Store.load("settings.json");
-  }
-
-  return settingsStore;
-}
-
-async function readTextFileAsBytes(path) {
-  const bytes = await readFile(path);
-  return new TextDecoder().decode(bytes);
-}
-
-async function writeBytesToFile(path, bytes) {
-  const file = await create(path);
-  await file.write(bytes);
-  await file.close();
-}
-
-export async function getRecentProjects() {
-  const store = await getStore();
-  return (await store.get(RECENT_PROJECTS_KEY)) || [];
-}
-
-export async function addRecentProject(projectPath) {
-  const store = await getStore();
-  const existing = (await store.get(RECENT_PROJECTS_KEY)) || [];
-
-  const next = [
-    projectPath,
-    ...existing.filter((path) => path !== projectPath),
-  ].slice(0, RECENT_PROJECTS_LIMIT);
-
-  await store.set(RECENT_PROJECTS_KEY, next);
-  await store.save();
-
-  return next;
-}
-
 export async function choosePdfFile() {
-  const selected = await open({
-    multiple: false,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-
-  if (!selected) return null;
-
-  const bytes = await readFile(selected);
-
-  return {
-    path: selected,
-    file: new File([bytes], "document.pdf", {
-      type: "application/pdf",
-    }),
-  };
+  const file = await chooseFile("application/pdf,.pdf");
+  return file ? { path: file.name, file } : null;
 }
 
 export async function chooseProjectFile() {
-  const selected = await open({
-    multiple: false,
-    filters: [{ name: "Cue Project", extensions: ["cueproj"] }],
-  });
-
-  if (!selected) return null;
-
-  return {
-    path: selected,
-    contents: await readTextFileAsBytes(selected),
-  };
+  const file = await chooseFile(".cueproj,application/json");
+  return file ? { path: file.name, contents: await file.text() } : null;
 }
 
-export async function readProjectFile(projectPath) {
-  return await readTextFileAsBytes(projectPath);
+export async function writeProjectFile(fileName, projectData) {
+  downloadFile(JSON.stringify(projectData, null, 2), fileName || "project.cueproj", "application/json");
 }
 
-export async function chooseSaveProjectPath() {
-  return await save({
-    defaultPath: "project.cueproj",
-    filters: [{ name: "Cue Project", extensions: ["cueproj"] }],
-  });
-}
-
-export async function writeProjectFile(projectPath, projectData) {
+export async function writeProjectFileAs(projectData, suggestedName = "project.cueproj") {
   const contents = JSON.stringify(projectData, null, 2);
-  const bytes = new TextEncoder().encode(contents);
 
-  await writeBytesToFile(projectPath, bytes);
+  if ("showSaveFilePicker" in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: "Script Markup Project",
+          accept: { "application/json": [".cueproj"] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(contents);
+      await writable.close();
+      return handle.name;
+    } catch (error) {
+      if (error?.name === "AbortError") return null;
+      throw error;
+    }
+  }
+
+  const requestedName = window.prompt("Save project as:", suggestedName);
+  if (requestedName === null) return null;
+  const fileName = requestedName.toLowerCase().endsWith(".cueproj")
+    ? requestedName
+    : `${requestedName}.cueproj`;
+  downloadFile(contents, fileName, "application/json");
+  return fileName;
 }
 
-export async function chooseExportPdfPath() {
-  return await save({
-    defaultPath: "annotated.pdf",
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
+export async function writePdfFile(fileName, pdfBytes) {
+  downloadFile(pdfBytes, fileName || "annotated.pdf", "application/pdf");
 }
 
-export async function writePdfFile(pdfPath, pdfBytes) {
-  await writeBytesToFile(pdfPath, pdfBytes);
-}
+export async function writePdfFileAs(pdfBytes, suggestedName = "document.pdf") {
+  if ("showSaveFilePicker" in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{
+          description: "PDF Document",
+          accept: { "application/pdf": [".pdf"] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(new Blob([pdfBytes], { type: "application/pdf" }));
+      await writable.close();
+      return handle.name;
+    } catch (error) {
+      if (error?.name === "AbortError") return null;
+      throw error;
+    }
+  }
 
-export async function getAutosavePath() {
-  const dir = await appDataDir();
-  await mkdir(dir, { recursive: true });
-  return await join(dir, AUTOSAVE_FILE_NAME);
+  const requestedName = window.prompt("Export PDF as:", suggestedName);
+  if (requestedName === null) return null;
+  const fileName = requestedName.toLowerCase().endsWith(".pdf")
+    ? requestedName
+    : `${requestedName}.pdf`;
+  downloadFile(pdfBytes, fileName, "application/pdf");
+  return fileName;
 }
 
 export async function writeAutosaveProject(projectData) {
-  const autosavePath = await getAutosavePath();
-  await writeProjectFile(autosavePath, projectData);
-  return autosavePath;
+  await accessAutosaveStore("readwrite", (store) => store.put(projectData, AUTOSAVE_KEY));
+  return "browser storage";
 }
 
 export async function readAutosaveProject() {
-  const autosavePath = await getAutosavePath();
-  const contents = await readProjectFile(autosavePath);
-
-  return {
-    path: autosavePath,
-    project: JSON.parse(contents),
-  };
+  const project = await accessAutosaveStore("readonly", (store) => store.get(AUTOSAVE_KEY));
+  if (!project) throw new Error("No autosave exists");
+  return { path: AUTOSAVE_KEY, project };
 }
