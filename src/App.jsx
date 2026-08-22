@@ -53,6 +53,15 @@ const getCueTypeOptionLabel = (type) =>
 const getCueTypeAbbreviation = (type) => (type === "TM" ? "SCENE" : type);
 const FADE_TEXT_PADDING = 14;
 const isUnitPosition = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+let fallbackIdSequence = 0;
+const createId = () => {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  fallbackIdSequence += 1;
+  return `${Date.now().toString(36)}-${fallbackIdSequence.toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
 const getFadeTextPosition = (cue, textSize) => ({
   x: cue.x,
   y: cue.y2 < cue.y
@@ -704,7 +713,7 @@ export default function App() {
       setCues((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           page: pageIndex,
           x: start.x,
           y: start.y,
@@ -731,7 +740,7 @@ export default function App() {
       setCues((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: createId(),
           page: pageIndex,
           left: Math.min(start.x, x),
           top: Math.min(start.y, y),
@@ -756,7 +765,7 @@ export default function App() {
     setCues((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: createId(),
         page: pageIndex,
         x,
         y,
@@ -1564,7 +1573,7 @@ export default function App() {
   const callingPageHasContent = callingPageHasCues;
 
   const addDivider = () => {
-    const dividerId = crypto.randomUUID();
+    const dividerId = createId();
     setDividers((current) => [
       ...current,
       {
@@ -1582,7 +1591,7 @@ export default function App() {
   };
 
   const addHeader = () => {
-    const headerId = crypto.randomUUID();
+    const headerId = createId();
     setHeaders((current) => [
       ...current,
       {
