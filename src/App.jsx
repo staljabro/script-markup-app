@@ -2256,7 +2256,7 @@ export default function App() {
                     <ol>
                       <li>Open <strong>Save / Load</strong> and select a source PDF.</li>
                       <li>Choose a tool from the toolbar beneath the header.</li>
-                      <li>Click the PDF to create cues, then adjust their appearance in <strong>Options</strong>.</li>
+                      <li>Click the document to create cues, then adjust their appearance in <strong>Options</strong>.</li>
                       <li>Save a project for later editing or export a finished PDF.</li>
                     </ol>
                   </article>
@@ -2267,7 +2267,8 @@ export default function App() {
                       <li><strong>SFX, Scene, and DCA</strong> create margin-based annotations.</li>
                       <li><strong>Note, Warn, and Mark</strong> place text directly on the page.</li>
                       <li>Select <strong>Pointer</strong> when you want to work without adding cues.</li>
-                      <li>Double-click cue text to rename it.</li>
+                      <li>Drag cues and their handles without changing the current selection.</li>
+                      <li>Rename a cue by double-clicking it on the page or editing its name in the cue list.</li>
                     </ul>
                   </article>
 
@@ -2282,12 +2283,35 @@ export default function App() {
                   </article>
 
                   <article className="help-card">
+                    <h3>Prompt/Showcall pages</h3>
+                    <ul>
+                      <li>Open <strong>Prompt/Showcall Page</strong> in Options to enable a blank page beside every PDF page.</li>
+                      <li>Choose a consistent left or right position for the whole document.</li>
+                      <li>The PDF and Prompt/Showcall page form one editing canvas, so cue lines and margins can cross the page divider.</li>
+                      <li>Switching sides preserves relative cue positions; line endpoints on the script remain in place.</li>
+                      <li>A Prompt/Showcall page containing cues cannot be disabled until those cues are moved or removed.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Dividers &amp; headers</h3>
+                    <ul>
+                      <li>Add shared vertical dividers or headers from <strong>Dividers and Headers</strong> in Options.</li>
+                      <li>Items created on a PDF or Prompt/Showcall page appear in the same position on every page of that type.</li>
+                      <li>Drag an unlocked item between the PDF and Prompt/Showcall sides. Dividers have colour and line-width controls; headers have colour and text-size controls.</li>
+                      <li>Select an item on the page or in Options. Edit header text there or by double-clicking the header on the page.</li>
+                      <li>Locking prevents moving, editing, or deleting both dividers and headers. <strong>Reset</strong> removes them all after confirmation.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
                     <h3>View &amp; visibility</h3>
                     <ul>
                       <li>Switch between stacked and side-by-side page layouts in the tool strip.</li>
                       <li>Use <strong>Scale</strong> to resize pages without changing export geometry.</li>
                       <li>Toggle the cue list from the button beside the scale control.</li>
                       <li>Hidden cue types remain saved but do not appear on pages or PDF exports.</li>
+                      <li>Only one Options accordion can be open at a time.</li>
                     </ul>
                   </article>
 
@@ -2298,6 +2322,7 @@ export default function App() {
                       <li>BLOCK additionally supports fill colour, opacity, no fill, and no line.</li>
                       <li>Search cues by name, type, or page from the cue list.</li>
                       <li>The Filter accordion controls which cue types appear in the list.</li>
+                      <li>Click a cue-list name to edit it inline; moving or editing a cue does not automatically select it.</li>
                     </ul>
                   </article>
 
@@ -2306,8 +2331,19 @@ export default function App() {
                     <ul>
                       <li><strong>Save Project</strong> downloads a timestamped project copy.</li>
                       <li><strong>Save Project As</strong> lets you choose its filename and location.</li>
-                      <li><strong>Export PDF</strong> creates an annotated PDF using visible cues.</li>
-                      <li>Autosave stores unsaved work in this browser every five minutes.</li>
+                      <li>Successful save and export actions display a confirmation.</li>
+                      <li><strong>Export PDF</strong> creates an annotated PDF using visible cues and outputs each Prompt/Showcall page as a separate page beside its source page in sequence.</li>
+                      <li>Items dragged outside their page area are omitted from saved projects and PDF exports.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Sessions &amp; replacing files</h3>
+                    <ul>
+                      <li>Your current PDF, cues, page setup, dividers, headers, and appearance settings are stored automatically in this browser.</li>
+                      <li>The previous session is restored automatically after a browser reload or return visit—no restore prompt is required.</li>
+                      <li><strong>Recover Autosave</strong> can manually reload the browser-stored copy if needed.</li>
+                      <li>Opening another PDF warns that it replaces the current PDF and cues. Remove PDF clears the document and its autosave.</li>
                     </ul>
                   </article>
                 </div>
@@ -2316,12 +2352,12 @@ export default function App() {
                   <h3>Keyboard &amp; pointer shortcuts</h3>
                   <div className="shortcut-grid">
                     <kbd>Esc</kbd><span>Cancel a pending cue, clear selection, and return to Pointer.</span>
-                    <kbd>Delete</kbd><span>Remove the selected cue.</span>
+                    <kbd>Delete / Backspace</kbd><span>Remove the selected cue, divider, or header when it is not locked.</span>
                     <kbd>Ctrl/Cmd + Z</kbd><span>Undo the last cue action.</span>
                     <kbd>Ctrl/Cmd + Shift + Z</kbd><span>Redo the last undone action.</span>
                     <kbd>Ctrl/Cmd + Y</kbd><span>Redo on Windows-style keyboards.</span>
-                    <kbd>Double-click</kbd><span>Edit a cue label, fade label, or block label.</span>
-                    <kbd>Drag</kbd><span>Move cues or adjust visible endpoint and corner handles.</span>
+                    <kbd>Double-click</kbd><span>Edit a cue, fade, block, or header label.</span>
+                    <kbd>Drag</kbd><span>Move cues, dividers, and headers, or adjust visible handles.</span>
                     <kbd>F / 7</kbd><span>Select Fade. Use B / 8 to select Block.</span>
                   </div>
                 </article>
