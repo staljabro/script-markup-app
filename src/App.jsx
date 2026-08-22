@@ -13,9 +13,11 @@ import {
   mdiFolderOpenOutline,
   mdiEye,
   mdiFormatListBulletedSquare,
+  mdiFormatPageSplit,
   mdiMarker,
   mdiMinusBoxOutline,
   mdiNoteTextOutline,
+  mdiPageNextOutline,
   mdiPencil,
   mdiPlusBoxOutline,
   mdiSineWave,
@@ -50,6 +52,7 @@ const getCueTypeOptionLabel = (type) =>
   type === "TM" ? "SCENE" : type;
 const getCueTypeAbbreviation = (type) => (type === "TM" ? "SCENE" : type);
 const FADE_TEXT_PADDING = 14;
+const isUnitPosition = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
 const getFadeTextPosition = (cue, textSize) => ({
   x: cue.x,
   y: cue.y2 < cue.y
@@ -127,6 +130,21 @@ export default function App() {
   const [pageLayout, setPageLayout] = useState("single");
   const [notesPageSide, setNotesPageSide] = useState("off");
   const [callingPageSide, setCallingPageSide] = useState("left");
+  const [dividers, setDividers] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [dividersLocked, setDividersLocked] = useState(false);
+  const [selectedDividerId, setSelectedDividerId] = useState(null);
+  const [selectedHeaderId, setSelectedHeaderId] = useState(null);
+  const [editingHeaderId, setEditingHeaderId] = useState(null);
+  const [headerTextDraft, setHeaderTextDraft] = useState("");
+  const [dividerAppearance, setDividerAppearance] = useState({
+    color: "#000000",
+    lineWidth: 1.5,
+  });
+  const [headerAppearance, setHeaderAppearance] = useState({
+    color: "#000000",
+    textSize: 25,
+  });
   const [displayScale, setDisplayScale] = useState(1);
   const [documentName, setDocumentName] = useState("Untitled");
   const [documentNameDraft, setDocumentNameDraft] = useState("Untitled");
@@ -136,6 +154,8 @@ export default function App() {
   const [showOptionsDrawer, setShowOptionsDrawer] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [expandedCueType, setExpandedCueType] = useState("SFX");
+  const [showCallingPageOptions, setShowCallingPageOptions] = useState(false);
+  const [showDecorationOptions, setShowDecorationOptions] = useState(false);
 
   const [cueTypeFilters, setCueTypeFilters] = useState(() =>
     Object.fromEntries(
@@ -231,6 +251,11 @@ export default function App() {
       hiddenCueTypes,
       notesPageSide,
       callingPageSide,
+      dividers: dividers.filter((divider) => isUnitPosition(divider.position)),
+      headers: headers.filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)),
+      dividersLocked,
+      dividerAppearance,
+      headerAppearance,
       combinedNotesCanvas: true,
     };
   };
@@ -269,6 +294,19 @@ export default function App() {
     setCallingPageSide(project.notesPageSide && project.notesPageSide !== "off"
       ? project.notesPageSide
       : (project.callingPageSide || "left"));
+    setDividers((project.dividers || []).map((divider) => ({ surface: "calling", ...divider })));
+    setHeaders(project.headers || []);
+    setDividersLocked(Boolean(project.dividersLocked));
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
+    setDividerAppearance((current) => ({
+      ...current,
+      ...(project.dividerAppearance || {}),
+    }));
+    setHeaderAppearance((current) => ({
+      ...current,
+      ...(project.headerAppearance || {}),
+    }));
     setSelectedCueId(null);
     setFadeStart(null);
     setBlockStart(null);
@@ -377,8 +415,13 @@ export default function App() {
       documentName,
       notesPageSide,
       callingPageSide,
+      dividers,
+      headers,
+      dividersLocked,
+      dividerAppearance,
+      headerAppearance,
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     const saveSession = async () => {
@@ -400,6 +443,11 @@ export default function App() {
           documentName: latest.documentName,
           notesPageSide: latest.notesPageSide,
           callingPageSide: latest.callingPageSide,
+          dividers: latest.dividers.filter((divider) => isUnitPosition(divider.position)),
+          headers: latest.headers.filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)),
+          dividersLocked: latest.dividersLocked,
+          dividerAppearance: latest.dividerAppearance,
+          headerAppearance: latest.headerAppearance,
           combinedNotesCanvas: true,
         };
 
@@ -421,7 +469,7 @@ export default function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     if (restoreAttemptedRef.current) return;
@@ -469,7 +517,24 @@ export default function App() {
         return;
       }
 
-      if (e.key === "Delete" && selectedCueId) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedHeaderId && !dividersLocked) {
+        e.preventDefault();
+        setHeaders((current) => current.filter((header) => header.id !== selectedHeaderId));
+        setSelectedHeaderId(null);
+        markDirty();
+        return;
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedDividerId && !dividersLocked) {
+        e.preventDefault();
+        setDividers((current) => current.filter((divider) => divider.id !== selectedDividerId));
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
+        markDirty();
+        return;
+      }
+
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedCueId) {
         e.preventDefault();
 
         pushUndo(cues);
@@ -477,12 +542,16 @@ export default function App() {
 
         setCues((prev) => prev.filter((cue) => cue.id !== selectedCueId));
         setSelectedCueId(null);
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
         return;
       }
 
       if (e.key === "Escape") {
         e.preventDefault();
         setSelectedCueId(null);
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
         setFadeStart(null);
         setBlockStart(null);
         setMode("POINTER");
@@ -508,7 +577,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undoStack, redoStack, cues, selectedCueId]);
+  }, [undoStack, redoStack, cues, selectedCueId, selectedDividerId, selectedHeaderId, dividersLocked]);
 
   useEffect(() => {
     const warnBeforeUnload = (event) => {
@@ -533,6 +602,11 @@ export default function App() {
     await loadPdf(selected.file);
 
     setCues([]);
+    setDividers([]);
+    setHeaders([]);
+    setDividersLocked(false);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setUndoStack([]);
     setRedoStack([]);
     setDocumentName(selected.file.name.replace(/\.pdf$/i, "") || "Untitled");
@@ -550,6 +624,11 @@ export default function App() {
 
     clearPdf();
     setCues([]);
+    setDividers([]);
+    setHeaders([]);
+    setDividersLocked(false);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setUndoStack([]);
     setRedoStack([]);
     setDocumentName("Untitled");
@@ -602,10 +681,14 @@ export default function App() {
   const addCue = (pageIndex, x, y) => {
     if (mode === "POINTER") {
       setSelectedCueId(null);
+      setSelectedDividerId(null);
+      setSelectedHeaderId(null);
       setFadeStart(null);
       setBlockStart(null);
       return;
     }
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
 
     if (mode === "FADE") {
       if (!fadeStart || fadeStart.page !== pageIndex) {
@@ -668,6 +751,7 @@ export default function App() {
 
     pushUndo(cues);
     markDirty();
+    setSelectedDividerId(null);
 
     setCues((prev) => [
       ...prev,
@@ -1191,6 +1275,65 @@ export default function App() {
         });
       });
 
+      if (dividers.length > 0 || headers.length > 0) {
+        pages.forEach((pageInfo, sourcePageIndex) => {
+          const callingPageIndex = sourcePageIndex * 2
+            + (notesPageSide === "left" ? 0 : 1);
+          const pdfPageIndex = notesPageSide === "off"
+            ? sourcePageIndex
+            : sourcePageIndex * 2 + (notesPageSide === "left" ? 1 : 0);
+          const [widthStart] = pageInfo.viewport.convertToPdfPoint(0, 0);
+          const [widthEnd] = pageInfo.viewport.convertToPdfPoint(dividerAppearance.lineWidth, 0);
+          const hex = dividerAppearance.color;
+          const dividerColor = rgb(
+            parseInt(hex.slice(1, 3), 16) / 255,
+            parseInt(hex.slice(3, 5), 16) / 255,
+            parseInt(hex.slice(5, 7), 16) / 255
+          );
+
+          dividers
+            .filter((divider) => isUnitPosition(divider.position)
+              && (divider.surface === "pdf" || notesPageSide !== "off"))
+            .forEach((divider) => {
+            const targetPage = pdfDoc.getPage(divider.surface === "pdf" ? pdfPageIndex : callingPageIndex);
+            const x = divider.position * pageInfo.width;
+            const [topX, topY] = pageInfo.viewport.convertToPdfPoint(x, 0);
+            const [bottomX, bottomY] = pageInfo.viewport.convertToPdfPoint(x, pageInfo.height);
+            targetPage.drawLine({
+              start: { x: topX, y: topY },
+              end: { x: bottomX, y: bottomY },
+              color: dividerColor,
+              thickness: Math.abs(widthEnd - widthStart),
+            });
+          });
+
+          const headerHex = headerAppearance.color;
+          const headerColor = rgb(
+            parseInt(headerHex.slice(1, 3), 16) / 255,
+            parseInt(headerHex.slice(3, 5), 16) / 255,
+            parseInt(headerHex.slice(5, 7), 16) / 255
+          );
+          headers
+            .filter((header) => isUnitPosition(header.x) && isUnitPosition(header.y)
+              && (header.surface === "pdf" || notesPageSide !== "off"))
+            .forEach((header) => {
+              const targetPage = pdfDoc.getPage(header.surface === "pdf" ? pdfPageIndex : callingPageIndex);
+              const [textX, textY] = pageInfo.viewport.convertToPdfPoint(
+                header.x * pageInfo.width,
+                header.y * pageInfo.height
+              );
+              const textWidth = font.widthOfTextAtSize(header.text, headerAppearance.textSize);
+              targetPage.drawText(header.text, {
+                x: textX - textWidth / 2,
+                y: textY - headerAppearance.textSize / 2,
+                size: headerAppearance.textSize,
+                font,
+                color: headerColor,
+              });
+            });
+        });
+      }
+
       const bytes = await pdfDoc.save();
 
       const savedName = await writePdfFileAs(
@@ -1227,6 +1370,8 @@ export default function App() {
   };
 
   const jumpToCue = (cue) => {
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setSelectedCueId(cue.id);
     cueRefs.current[cue.id]?.scrollIntoView({
       behavior: "smooth",
@@ -1240,6 +1385,8 @@ export default function App() {
       suppressNextSvgClickRef.current = false;
       return;
     }
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
     setSelectedCueId(cueId);
   };
 
@@ -1414,6 +1561,100 @@ export default function App() {
     if (cueCoordinates.some((x) => isOnCallingPage(x, width))) return true;
     return isMarginCue(cue.type) && isOnCallingPage(margins[cue.type], width);
   });
+  const callingPageHasContent = callingPageHasCues;
+
+  const addDivider = () => {
+    const dividerId = crypto.randomUUID();
+    setDividers((current) => [
+      ...current,
+      {
+        id: dividerId,
+        surface: notesPageSide === "off" ? "pdf" : "calling",
+        position: 0.5,
+      },
+    ]);
+    if (!dividersLocked) {
+      setSelectedCueId(null);
+      setSelectedHeaderId(null);
+      setSelectedDividerId(dividerId);
+    }
+    markDirty();
+  };
+
+  const addHeader = () => {
+    const headerId = crypto.randomUUID();
+    setHeaders((current) => [
+      ...current,
+      {
+        id: headerId,
+        surface: notesPageSide === "off" ? "pdf" : "calling",
+        x: 0.5,
+        y: 0.08,
+        text: "Header",
+      },
+    ]);
+    if (!dividersLocked) {
+      setSelectedCueId(null);
+      setSelectedDividerId(null);
+      setSelectedHeaderId(headerId);
+    }
+    markDirty();
+  };
+
+  const removeHeader = (headerId) => {
+    if (dividersLocked) return;
+    setHeaders((current) => current.filter((header) => header.id !== headerId));
+    setSelectedHeaderId((current) => current === headerId ? null : current);
+    markDirty();
+  };
+
+  const beginEditingHeader = (header) => {
+    if (dividersLocked) return;
+    setSelectedCueId(null);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(header.id);
+    setHeaderTextDraft(header.text);
+    setEditingHeaderId(header.id);
+  };
+
+  const editHeaderWithPrompt = (header) => {
+    if (dividersLocked) return;
+    const nextText = window.prompt("Edit header:", header.text);
+    if (nextText === null || !nextText.trim()) return;
+    setHeaders((current) => current.map((item) =>
+      item.id === header.id ? { ...item, text: nextText.trim() } : item
+    ));
+    markDirty();
+  };
+
+  const commitHeaderText = (header) => {
+    const nextText = headerTextDraft.trim() || header.text;
+    if (nextText !== header.text) {
+      setHeaders((current) => current.map((item) =>
+        item.id === header.id ? { ...item, text: nextText } : item
+      ));
+      markDirty();
+    }
+    setEditingHeaderId(null);
+  };
+
+  const resetDividersAndHeaders = () => {
+    if (dividersLocked) return;
+    if (!window.confirm("Remove all dividers and headers? This cannot be undone.")) return;
+    setDividers([]);
+    setHeaders([]);
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
+    setEditingHeaderId(null);
+    markDirty();
+  };
+
+  const removeDivider = (dividerId) => {
+    if (dividersLocked) return;
+    setDividers((current) => current.filter((divider) => divider.id !== dividerId));
+    setSelectedDividerId((current) => current === dividerId ? null : current);
+    markDirty();
+  };
 
   const moveCallingPageTo = (nextSide) => {
     if (notesPageSide === "off" || notesPageSide === nextSide) {
@@ -1454,8 +1695,8 @@ export default function App() {
   };
 
   const setCallingPageEnabled = (enabled) => {
-    if (!enabled && callingPageHasCues) {
-      alert("The calling page cannot be disabled while cues are placed on it. Move or remove those cues first.");
+    if (!enabled && callingPageHasContent) {
+      alert("The Prompt/Showcall Page cannot be disabled while it contains cues or dividers. Move or remove them first.");
       return;
     }
     if (!enabled) {
@@ -1582,18 +1823,35 @@ export default function App() {
             <h2>Tool Options</h2>
             <button onClick={() => setShowOptionsDrawer(false)} aria-label="Close options">×</button>
           </div>
-          <section className="calling-page-options">
-            <h3>Calling Page</h3>
-            <label>
-              <span>Enable calling page</span>
+          <section className="cue-option-section calling-page-section" style={{ "--cue-color": "#374151" }}>
+            <button
+              className={`cue-option-trigger ${showCallingPageOptions ? "is-expanded" : ""}`}
+              onClick={() => {
+                const nextExpanded = !showCallingPageOptions;
+                setShowCallingPageOptions(nextExpanded);
+                setShowDecorationOptions(false);
+                setExpandedCueType(null);
+              }}
+              aria-expanded={showCallingPageOptions}
+            >
+              <span className="cue-option-icon"><MaterialIcon path={mdiPageNextOutline} /></span>
+              <span className="cue-option-name"><strong>PROMPT/SHOWCALL PAGE</strong></span>
+              <span className="cue-option-chevron">
+                <MaterialIcon path={showCallingPageOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
+              </span>
+            </button>
+            {showCallingPageOptions && <div className="calling-page-options">
+            <label className={!pdfBytes || (notesPageSide !== "off" && callingPageHasContent) ? "is-disabled" : ""}>
+              <span>Enable prompt/showcall page</span>
               <input
                 type="checkbox"
                 checked={notesPageSide !== "off"}
+                disabled={!pdfBytes || (notesPageSide !== "off" && callingPageHasContent)}
                 onChange={(e) => setCallingPageEnabled(e.target.checked)}
               />
             </label>
             <label className={notesPageSide === "off" ? "is-disabled" : ""}>
-              <span>Calling page side</span>
+              <span>Prompt/showcall page side</span>
               <select
                 value={callingPageSide}
                 disabled={notesPageSide === "off"}
@@ -1603,12 +1861,98 @@ export default function App() {
                 <option value="right">Right</option>
               </select>
             </label>
-            {callingPageHasCues && (
-              <small>Move or remove calling-page cues before disabling this page.</small>
+            {callingPageHasContent && (
+              <small>Move or remove prompt/showcall-page cues before disabling this page.</small>
             )}
+            </div>}
+          </section>
+          <section className="cue-option-section decoration-section" style={{ "--cue-color": "#111827" }}>
+            <button
+              className={`cue-option-trigger ${showDecorationOptions ? "is-expanded" : ""}`}
+              onClick={() => {
+                const nextExpanded = !showDecorationOptions;
+                setShowDecorationOptions(nextExpanded);
+                setShowCallingPageOptions(false);
+                setExpandedCueType(null);
+              }}
+              aria-expanded={showDecorationOptions}
+            >
+              <span className="cue-option-icon"><MaterialIcon path={mdiFormatPageSplit} /></span>
+              <span className="cue-option-name"><strong>DIVIDERS AND HEADERS</strong></span>
+              <span className="cue-option-chevron">
+                <MaterialIcon path={showDecorationOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
+              </span>
+            </button>
+            {showDecorationOptions && <div className="decoration-options">
+              <label>
+                <span>Lock dividers and headers</span>
+                <input
+                  type="checkbox"
+                  checked={dividersLocked}
+                  onChange={(e) => {
+                    setDividersLocked(e.target.checked);
+                    if (e.target.checked) {
+                      setSelectedDividerId(null);
+                      setSelectedHeaderId(null);
+                      setEditingHeaderId(null);
+                    }
+                    markDirty();
+                  }}
+                />
+              </label>
+
+              <div className="decoration-group">
+                <div className="divider-options-heading">
+                  <strong>Dividers</strong>
+                  <button type="button" disabled={!pdfBytes} onClick={addDivider}>Add divider</button>
+                </div>
+                <label><span>Colour</span><input type="color" value={dividerAppearance.color} onChange={(e) => { setDividerAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label>
+                  <span>Line width</span>
+                  <span className="divider-width-control">
+                    <input type="range" min="0.5" max="8" step="0.5" value={dividerAppearance.lineWidth} onChange={(e) => { setDividerAppearance((current) => ({ ...current, lineWidth: parseFloat(e.target.value) })); markDirty(); }} />
+                    <output>{dividerAppearance.lineWidth}</output>
+                  </span>
+                </label>
+                {dividers.map((divider, index) => (
+                  <div className={`divider-list-item${selectedDividerId === divider.id ? " is-selected" : ""}`} key={divider.id} role={dividersLocked ? undefined : "button"} tabIndex={dividersLocked ? undefined : 0} onClick={() => { if (dividersLocked) return; setSelectedCueId(null); setSelectedHeaderId(null); setSelectedDividerId(divider.id); }}>
+                    <span>Divider {index + 1} <small>({divider.surface === "pdf" ? "PDF" : "Prompt/Showcall"})</small></span>
+                    <button type="button" aria-label={`Remove Divider ${index + 1}`} disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); removeDivider(divider.id); }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="decoration-group">
+                <div className="divider-options-heading">
+                  <strong>Headers</strong>
+                  <button type="button" disabled={!pdfBytes} onClick={addHeader}>Add header</button>
+                </div>
+                <label><span>Colour</span><input type="color" value={headerAppearance.color} onChange={(e) => { setHeaderAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label>
+                  <span>Text size</span>
+                  <span className="divider-width-control">
+                    <input type="range" min="8" max="72" step="1" value={headerAppearance.textSize} onChange={(e) => { setHeaderAppearance((current) => ({ ...current, textSize: parseFloat(e.target.value) })); markDirty(); }} />
+                    <output>{headerAppearance.textSize}</output>
+                  </span>
+                </label>
+                {headers.map((header, index) => (
+                  <div className={`divider-list-item${selectedHeaderId === header.id ? " is-selected" : ""}`} key={header.id} role={dividersLocked ? undefined : "button"} tabIndex={dividersLocked ? undefined : 0} onClick={() => { if (dividersLocked) return; setSelectedCueId(null); setSelectedDividerId(null); setSelectedHeaderId(header.id); }}>
+                    {editingHeaderId === header.id ? (
+                      <input className="header-name-editor" autoFocus value={headerTextDraft} onClick={(e) => e.stopPropagation()} onChange={(e) => setHeaderTextDraft(e.target.value)} onBlur={() => commitHeaderText(header)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commitHeaderText(header); if (e.key === "Escape") setEditingHeaderId(null); }} />
+                    ) : (
+                      <button type="button" className="header-name-display" disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); beginEditingHeader(header); }}>{header.text}</button>
+                    )}
+                    <small>{header.surface === "pdf" ? "PDF" : "Prompt/Showcall"}</small>
+                    <button type="button" aria-label={`Remove header ${index + 1}`} disabled={dividersLocked} onClick={(e) => { e.stopPropagation(); removeHeader(header.id); }}>×</button>
+                  </div>
+                ))}
+              </div>
+
+              <button type="button" className="reset-decorations-button" disabled={dividersLocked || (dividers.length === 0 && headers.length === 0)} onClick={resetDividersAndHeaders}>Reset dividers and headers</button>
+            </div>}
           </section>
           <div className="cue-options-accordion">
-            {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type }) => {
+            {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type, icon }) => {
               const isExpanded = expandedCueType === type;
               return (
                 <section className="cue-option-section" key={type} style={{ "--cue-color": colors[type] }}>
@@ -1616,12 +1960,14 @@ export default function App() {
                     className={`cue-option-trigger ${isExpanded ? "is-expanded" : ""}`}
                     onClick={() => {
                       setExpandedCueType(isExpanded ? null : type);
+                      setShowCallingPageOptions(false);
+                      setShowDecorationOptions(false);
                     }}
                     aria-expanded={isExpanded}
                   >
-                    <span className="cue-option-dot" />
+                    <span className="cue-option-icon"><MaterialIcon path={icon} /></span>
                     <span className="cue-option-name">
-                      <strong>{getCueTypeOptionLabel(type)}</strong>
+                      <strong>{getCueTypeOptionLabel(type)} CUES</strong>
                       {hiddenCueTypes[type] && <span className="hidden-status">(Hidden)</span>}
                     </span>
                     <span className="cue-option-chevron">
@@ -2048,6 +2394,158 @@ export default function App() {
               }}
             >
               <g transform={`translate(${documentOffset} 0)`}>
+              {dividers.filter((divider) => divider.surface === "pdf" || notesPageSide !== "off").map((divider) => {
+                const dividerX = divider.surface === "pdf"
+                  ? divider.position * p.width
+                  : notesPageSide === "left"
+                    ? (divider.position - 1) * p.width
+                    : (1 + divider.position) * p.width;
+                return (
+                  <g
+                    key={divider.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked || suppressNextSvgClickRef.current) return;
+                      setSelectedCueId(null);
+                      setSelectedHeaderId(null);
+                      setSelectedDividerId(divider.id);
+                    }}
+                  >
+                    {selectedDividerId === divider.id && !dividersLocked && (
+                      <line
+                        x1={dividerX}
+                        y1={0}
+                        x2={dividerX}
+                        y2={p.height}
+                        stroke="#facc15"
+                        strokeWidth={dividerAppearance.lineWidth + 4}
+                        pointerEvents="none"
+                      />
+                    )}
+                    <line
+                      x1={dividerX}
+                      y1={0}
+                      x2={dividerX}
+                      y2={p.height}
+                      stroke={dividerAppearance.color}
+                      strokeWidth={dividerAppearance.lineWidth}
+                    />
+                    <line
+                      x1={dividerX}
+                      y1={0}
+                      x2={dividerX}
+                      y2={p.height}
+                      stroke="transparent"
+                      strokeWidth={14}
+                      style={{ cursor: dividersLocked ? "default" : "ew-resize" }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        if (dividersLocked) return;
+                        e.preventDefault();
+                        const svg = e.currentTarget.ownerSVGElement;
+                        const rect = svg.getBoundingClientRect();
+                        let moved = false;
+
+                        const move = (event) => {
+                          moved = true;
+                          const displayX = (event.clientX - rect.left)
+                            * (svg.viewBox.baseVal.width / rect.width);
+                          const onPdfPage = displayX >= documentOffset
+                            && displayX <= documentOffset + p.width;
+                          const surface = onPdfPage || notesPageSide === "off" ? "pdf" : "calling";
+                          const localX = surface === "pdf"
+                            ? displayX - documentOffset
+                            : notesPageSide === "left" ? displayX : displayX - p.width;
+                          const position = Math.max(0, Math.min(1, localX / p.width));
+                          setDividers((current) => current.map((item) =>
+                            item.id === divider.id ? { ...item, surface, position } : item
+                          ));
+                        };
+
+                        const up = () => {
+                          if (moved) markDirty();
+                          suppressNextSvgClickRef.current = moved;
+                          setTimeout(() => { suppressNextSvgClickRef.current = false; }, 0);
+                          window.removeEventListener("mousemove", move);
+                          window.removeEventListener("mouseup", up);
+                        };
+
+                        window.addEventListener("mousemove", move);
+                        window.addEventListener("mouseup", up);
+                      }}
+                    />
+                  </g>
+                );
+              })}
+              {headers.filter((header) => header.surface === "pdf" || notesPageSide !== "off").map((header) => {
+                const headerX = header.surface === "pdf"
+                  ? header.x * p.width
+                  : notesPageSide === "left"
+                    ? (header.x - 1) * p.width
+                    : (1 + header.x) * p.width;
+                const headerY = header.y * p.height;
+                return (
+                  <text
+                    key={header.id}
+                    x={headerX}
+                    y={headerY}
+                    fill={headerAppearance.color}
+                    fontSize={headerAppearance.textSize}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    stroke={selectedHeaderId === header.id && !dividersLocked ? "#facc15" : "none"}
+                    strokeWidth={selectedHeaderId === header.id && !dividersLocked ? 3 : 0}
+                    paintOrder="stroke"
+                    style={{ cursor: dividersLocked ? "default" : "move", userSelect: "none" }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked || suppressNextSvgClickRef.current) return;
+                      setSelectedCueId(null);
+                      setSelectedDividerId(null);
+                      setSelectedHeaderId(header.id);
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      editHeaderWithPrompt(header);
+                    }}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      if (dividersLocked) return;
+                      e.preventDefault();
+                      const svg = e.currentTarget.ownerSVGElement;
+                      const rect = svg.getBoundingClientRect();
+                      let moved = false;
+
+                      const move = (event) => {
+                        moved = true;
+                        const displayX = (event.clientX - rect.left) * (svg.viewBox.baseVal.width / rect.width);
+                        const displayY = (event.clientY - rect.top) * (svg.viewBox.baseVal.height / rect.height);
+                        const onPdfPage = displayX >= documentOffset && displayX <= documentOffset + p.width;
+                        const surface = onPdfPage || notesPageSide === "off" ? "pdf" : "calling";
+                        const localX = surface === "pdf"
+                          ? displayX - documentOffset
+                          : notesPageSide === "left" ? displayX : displayX - p.width;
+                        const x = Math.max(0, Math.min(1, localX / p.width));
+                        const y = Math.max(0.02, Math.min(1, displayY / p.height));
+                        setHeaders((current) => current.map((item) =>
+                          item.id === header.id ? { ...item, surface, x, y } : item
+                        ));
+                      };
+
+                      const up = () => {
+                        if (moved) markDirty();
+                        suppressNextSvgClickRef.current = moved;
+                        setTimeout(() => { suppressNextSvgClickRef.current = false; }, 0);
+                        window.removeEventListener("mousemove", move);
+                        window.removeEventListener("mouseup", up);
+                      };
+                      window.addEventListener("mousemove", move);
+                      window.addEventListener("mouseup", up);
+                    }}
+                  >{header.text}</text>
+                );
+              })}
               {cues
                 .filter((c) => c.page === pageIndex && !hiddenCueTypes[c.type])
                 .map((cue) => {
@@ -2586,7 +3084,7 @@ export default function App() {
                     anchorX < 0 || anchorX > width
                     || (typeof marginX === "number" && (marginX < 0 || marginX > width))
                   );
-                  return hasCallingContent ? " · Calling" : "";
+                  return hasCallingContent ? " · Prompt/Showcall" : "";
                 })()}
               </small>
             </div>
