@@ -6,3 +6,6 @@ services:
     ports:
       - "8086:80"
     restart: unless-stopped
+    labels:
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/staljabro/script-markup-app/main/public/icon.png"
+      net.unraid.docker.webui: "http://[IP]:[PORT:8087]"
