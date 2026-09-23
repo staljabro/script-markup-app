@@ -1,0 +1,8 @@
+services:
+  script-markup-app:
+    image: ghcr.io/staljabro/script-markup-app:latest
+    pull_policy: always
+    container_name: script-markup-app
+    ports:
+      - "8086:80"
+    restart: unless-stopped
