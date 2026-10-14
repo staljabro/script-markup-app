@@ -1,28 +1,54 @@
-import { useEffect, useRef, useState } from "react";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LineCapStyle, PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import {
   mdiAlertCircleOutline,
+  mdiArrowULeftTop,
   mdiBackupRestore,
+  mdiBellOutline,
+  mdiBookOpenPageVariantOutline,
+  mdiBookmarkOutline,
   mdiBorderNoneVariant,
+  mdiBullhornOutline,
+  mdiCameraOutline,
+  mdiCheckCircleOutline,
+  mdiClockOutline,
+  mdiCogOutline,
+  mdiCommentTextOutline,
   mdiCursorDefault,
   mdiContentSaveEditOutline,
   mdiContentSaveOutline,
   mdiDeleteOutline,
   mdiFileExportOutline,
   mdiFilePdfBox,
+  mdiFindReplace,
   mdiFolderOpenOutline,
   mdiEye,
+  mdiFlagOutline,
+  mdiFlashOutline,
   mdiFormatListBulletedSquare,
-  mdiFormatPageSplit,
+  mdiHeartOutline,
+  mdiLightbulbOutline,
+  mdiMapMarkerOutline,
   mdiMarker,
+  mdiMicrophone,
+  mdiMicrophoneOff,
   mdiMinusBoxOutline,
   mdiNoteTextOutline,
-  mdiPageNextOutline,
+  mdiMusicNote,
+  mdiPaletteOutline,
   mdiPencil,
+  mdiPinOutline,
+  mdiPlayCircleOutline,
   mdiPlusBoxOutline,
+  mdiRadio,
+  mdiScriptTextOutline,
   mdiSineWave,
+  mdiStarOutline,
+  mdiStopCircleOutline,
+  mdiTagOutline,
   mdiTrendingUp,
   mdiTuneVertical,
+  mdiVolumeHigh,
 } from "@mdi/js";
 import { usePdfRenderer } from "./hooks/usePdfRenderer";
 import {
@@ -39,19 +65,65 @@ import {
 } from "./lib/projectFiles";
 
 const MARGIN_CUE_TYPES = ["SFX", "TM", "DCA"];
-const FREE_CUE_TYPES = ["NOTE", "WARN", "MARK"];
+const FREE_CUE_TYPES = ["NOTE"];
 const LINE_CUE_TYPES = ["FADE"];
 const AREA_CUE_TYPES = ["BLOCK"];
 const ALL_CUE_TYPES = [...MARGIN_CUE_TYPES, ...LINE_CUE_TYPES, ...AREA_CUE_TYPES, ...FREE_CUE_TYPES];
 
-const isMarginCue = (type) => MARGIN_CUE_TYPES.includes(type);
-const isFreeCue = (type) => FREE_CUE_TYPES.includes(type);
-const hasLines = (type) => type === "SFX" || type === "TM" || type === "FADE";
+const getCueBaseType = (type) => {
+  if (type?.startsWith("CUSTOM_POINT_")) return "SFX";
+  if (type?.startsWith("CUSTOM_NOTE_")) return "NOTE";
+  if (type?.startsWith("CUSTOM_BLOCK_")) return "BLOCK";
+  return type;
+};
+
+const isMarginCue = (type) => MARGIN_CUE_TYPES.includes(getCueBaseType(type));
+const isFreeCue = (type) => FREE_CUE_TYPES.includes(getCueBaseType(type));
+const isBlockCue = (type) => getCueBaseType(type) === "BLOCK";
+const isPointCue = (type) => ["SFX", "TM"].includes(getCueBaseType(type));
+const hasLines = (type) => isPointCue(type) || type === "FADE";
 const getCueTypeName = (type) => (type === "TM" ? "Scene" : type);
 const getCueTypeOptionLabel = (type) =>
   type === "TM" ? "SCENE" : type;
-const getCueTypeAbbreviation = (type) => (type === "TM" ? "SCENE" : type);
 const FADE_TEXT_PADDING = 14;
+const DEFAULT_CUE_MARKER_HEIGHT = 20;
+const CUE_TEXT_GAP = 5;
+const roundLineWidth = (value) => Math.round(Number(value) * 10) / 10;
+const formatLineWidth = (value) => roundLineWidth(value).toFixed(1);
+const DEFAULT_MARGINS = { SFX: 150, TM: 100, DCA: 50 };
+const DEFAULT_COLORS = {
+  POINTER: "#5b6474", SFX: "#cc00cc", TM: "#0000ff", DCA: "#ff0000",
+  FADE: "#008000", BLOCK: "#c9c9c9", NOTE: "#8a2be2",
+};
+const DEFAULT_STYLES = {
+  POINTER: { textSize: 20, lineWidth: 1.5 },
+  SFX: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true },
+  TM: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true },
+  DCA: { textSize: 20, lineWidth: 1.5 }, FADE: { textSize: 20, lineWidth: 1.5 },
+  BLOCK: { textSize: 20, lineWidth: 1.5 }, NOTE: { textSize: 20, lineWidth: 1.5 },
+};
+const DEFAULT_BLOCK_APPEARANCE = { fillColor: "#ffffff", fillOpacity: 0.25, lineEnabled: true, fillEnabled: true };
+const COLOR_PALETTE = [
+  "#000000", "#374151", "#6b7280", "#ffffff", "#7f1d1d",
+  "#dc2626", "#f97316", "#facc15", "#15803d", "#22c55e",
+  "#0f766e", "#06b6d4", "#2563eb", "#0000ff", "#7c3aed",
+  "#8a2be2", "#cc00cc", "#ec4899", "#c9c9c9", "#92400e",
+];
+const getMarginCueLayout = (cue, marginX, cueStyle) => {
+  const linePosition = cueStyle.cueLinePosition || "below";
+  const textPosition = cueStyle.textPosition || "above";
+  const cueSide = cueStyle.cueSide || "after";
+  const markerHalfHeight = (cueStyle.markerHeight || DEFAULT_CUE_MARKER_HEIGHT) / 2;
+  const lineY = cue.y + (linePosition === "above" ? -markerHalfHeight : markerHalfHeight);
+
+  return {
+    lineY,
+    markerHalfHeight,
+    textX: marginX + (cueSide === "before" ? -CUE_TEXT_GAP : CUE_TEXT_GAP),
+    textY: lineY + (textPosition === "above" ? -CUE_TEXT_GAP : cueStyle.textSize + CUE_TEXT_GAP),
+    textAnchor: cueSide === "before" ? "end" : "start",
+  };
+};
 const isUnitPosition = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
 let fallbackIdSequence = 0;
 const createId = () => {
@@ -84,14 +156,54 @@ const TOOL_BUTTONS = [
   { type: "TM", label: "Scene", icon: mdiFormatListBulletedSquare },
   { type: "DCA", label: "DCA", icon: mdiTuneVertical },
   { type: "NOTE", label: "Note", icon: mdiNoteTextOutline },
-  { type: "WARN", label: "Warn", icon: mdiAlertCircleOutline },
-  { type: "MARK", label: "Mark", icon: mdiMarker },
   { type: "FADE", label: "Fade", icon: mdiTrendingUp },
   { type: "BLOCK", label: "Block", icon: mdiBorderNoneVariant },
 ];
 
+const CUSTOM_CUE_ICONS = [
+  ["wave", "Wave", mdiSineWave], ["microphone", "Microphone", mdiMicrophone], ["microphone-off", "Microphone off", mdiMicrophoneOff],
+  ["note", "Note", mdiNoteTextOutline], ["alert", "Alert", mdiAlertCircleOutline],
+  ["marker", "Marker", mdiMarker], ["bell", "Bell", mdiBellOutline], ["book", "Book", mdiBookOpenPageVariantOutline],
+  ["bookmark", "Bookmark", mdiBookmarkOutline], ["bullhorn", "Bullhorn", mdiBullhornOutline], ["camera", "Camera", mdiCameraOutline],
+  ["check", "Check", mdiCheckCircleOutline], ["clock", "Clock", mdiClockOutline], ["cog", "Cog", mdiCogOutline],
+  ["comment", "Comment", mdiCommentTextOutline], ["flag", "Flag", mdiFlagOutline], ["flash", "Flash", mdiFlashOutline],
+  ["heart", "Heart", mdiHeartOutline], ["lightbulb", "Lightbulb", mdiLightbulbOutline],
+  ["location", "Location", mdiMapMarkerOutline], ["music", "Music", mdiMusicNote],
+  ["palette", "Palette", mdiPaletteOutline], ["pin", "Pin", mdiPinOutline], ["play", "Play", mdiPlayCircleOutline],
+  ["radio", "Radio", mdiRadio], ["script", "Script", mdiScriptTextOutline], ["star", "Star", mdiStarOutline],
+  ["stop", "Stop", mdiStopCircleOutline], ["tag", "Tag", mdiTagOutline], ["volume", "Volume", mdiVolumeHigh],
+];
+const CUSTOM_CUE_ICON_PATHS = Object.fromEntries(CUSTOM_CUE_ICONS.map(([id, , path]) => [id, path]));
+const getDefaultCustomCueIcon = (kind) => kind === "POINT" ? "wave" : kind === "BLOCK" ? "stop" : "note";
+
 function MaterialIcon({ path }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={path} /></svg>;
+}
+function PaletteColorInput({ value, disabled = false, onCommit }) {
+  const detailsRef = useRef(null);
+  const hexInputRef = useRef(null);
+  const applyColor = (nextColor) => {
+    const normalized = nextColor.startsWith("#") ? nextColor : `#${nextColor}`;
+    if (!/^#[0-9a-f]{6}$/i.test(normalized)) return;
+    onCommit(normalized.toLowerCase());
+    if (detailsRef.current) detailsRef.current.open = false;
+  };
+  return (
+    <details ref={detailsRef} className={`palette-color-picker${disabled ? " is-disabled" : ""}`}>
+      <summary aria-label="Choose colour" aria-disabled={disabled} onClick={(event) => { if (disabled) event.preventDefault(); }}>
+        <span style={{ background: value }} />
+      </summary>
+      <div className="palette-color-popover">
+        <div className="palette-color-grid">
+          {COLOR_PALETTE.map((color) => <button key={color} type="button" aria-label={color} title={color} className={color.toLowerCase() === value.toLowerCase() ? "is-selected" : ""} style={{ background: color }} onClick={() => applyColor(color)} />)}
+        </div>
+        <div className="palette-hex-entry">
+          <input ref={hexInputRef} key={value} defaultValue={value} aria-label="Hex colour" maxLength={7} onKeyDown={(event) => { if (event.key === "Enter") applyColor(event.currentTarget.value); }} />
+          <button type="button" onClick={() => applyColor(hexInputRef.current?.value || "")}>Apply</button>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 function ToolbarIcon({ name }) {
@@ -113,6 +225,7 @@ function ToolbarIcon({ name }) {
   if (name === "stack") return <svg {...common}><rect x="5" y="3" width="14" height="7" rx="1"/><rect x="5" y="14" width="14" height="7" rx="1"/></svg>;
   if (name === "columns") return <svg {...common}><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>;
   if (name === "options") return <svg {...common}><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="8" cy="18" r="2" fill="currentColor"/></svg>;
+  if (name === "tools") return <svg {...common}><path d="M14.7 6.3a4 4 0 0 0-5-5L12 3.6 9.6 6 7.3 3.7a4 4 0 0 0 5 5L4 17l3 3 8.3-8.3a4 4 0 0 0 5-5L18 9l-2.4-2.4 2.3-2.3a4 4 0 0 0-3.2 2z"/></svg>;
   return <svg {...common}><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1.2.9-1.2 1.8M12 17h.01"/></svg>;
 }
 
@@ -129,13 +242,15 @@ export default function App() {
   const [lastAutosave, setLastAutosave] = useState(null);
   const [search, setSearch] = useState("");
   const [showCueFilters, setShowCueFilters] = useState(false);
-  const [selectedCueId, setSelectedCueId] = useState(null);
+  const [selectedCueId, setSelectedCueIdState] = useState(null);
+  const [selectedCueIds, setSelectedCueIds] = useState([]);
   const [editingCueId, setEditingCueId] = useState(null);
   const [cueNameDraft, setCueNameDraft] = useState("");
   const [fadeStart, setFadeStart] = useState(null);
   const [blockStart, setBlockStart] = useState(null);
 
   const [showCueList, setShowCueList] = useState(true);
+  const [showInspector, setShowInspector] = useState(false);
   const [pageLayout, setPageLayout] = useState("single");
   const [notesPageSide, setNotesPageSide] = useState("off");
   const [callingPageSide, setCallingPageSide] = useState("left");
@@ -159,18 +274,31 @@ export default function App() {
   const [documentNameDraft, setDocumentNameDraft] = useState("Untitled");
   const [isEditingDocumentName, setIsEditingDocumentName] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [activeToolsView, setActiveToolsView] = useState(null);
   const [fileActionInProgress, setFileActionInProgress] = useState(null);
   const [showOptionsDrawer, setShowOptionsDrawer] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [expandedCueType, setExpandedCueType] = useState("SFX");
-  const [showCallingPageOptions, setShowCallingPageOptions] = useState(false);
-  const [showDecorationOptions, setShowDecorationOptions] = useState(false);
+  const [expandedCueType, setExpandedCueType] = useState(null);
+  const [showGeneralOptions, setShowGeneralOptions] = useState(false);
 
   const [cueTypeFilters, setCueTypeFilters] = useState(() =>
     Object.fromEntries(
       ALL_CUE_TYPES.map((type) => [type, true])
     )
   );
+  const [showCustomCuesOnly, setShowCustomCuesOnly] = useState(false);
+  const [customCueTypes, setCustomCueTypes] = useState([]);
+  const [customCueTypeName, setCustomCueTypeName] = useState("");
+  const [customCueTypeKind, setCustomCueTypeKind] = useState("POINT");
+  const [customCueTypeIcon, setCustomCueTypeIcon] = useState("wave");
+  const [customCueTypePrefix, setCustomCueTypePrefix] = useState("");
+  const [customCueTypeSuffix, setCustomCueTypeSuffix] = useState("");
+  const [convertFromType, setConvertFromType] = useState("");
+  const [convertToType, setConvertToType] = useState("");
+  const [findReplaceType, setFindReplaceType] = useState("");
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
   const [hiddenCueTypes, setHiddenCueTypes] = useState(() =>
     Object.fromEntries(ALL_CUE_TYPES.map((type) => [type, false]))
   );
@@ -182,6 +310,7 @@ export default function App() {
   const restoreAttemptedRef = useRef(false);
   const loadProjectDataRef = useRef(null);
   const toolToolbarRef = useRef(null);
+  const editorMainRef = useRef(null);
 
   useEffect(() => {
     const toolbar = toolToolbarRef.current;
@@ -200,42 +329,115 @@ export default function App() {
     };
   }, []);
 
-  const [margins, setMargins] = useState({
-    SFX: 150,
-    TM: 100,
-    DCA: 50,
+  useEffect(() => {
+    const editor = editorMainRef.current;
+    if (!editor) return undefined;
+    const handleZoomWheel = (event) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      setDisplayScale((current) => Math.min(2, Math.max(0.5, Math.round((current + direction * 0.05) * 20) / 20)));
+    };
+    editor.addEventListener("wheel", handleZoomWheel, { passive: false });
+    return () => editor.removeEventListener("wheel", handleZoomWheel);
+  }, []);
+
+  const [margins, setMargins] = useState({ ...DEFAULT_MARGINS });
+
+  const [colors, setColors] = useState({ ...DEFAULT_COLORS });
+
+  const [styles, setStyles] = useState(() => Object.fromEntries(Object.entries(DEFAULT_STYLES).map(([type, style]) => [type, { ...style }])));
+
+  const [blockAppearance, setBlockAppearance] = useState({ ...DEFAULT_BLOCK_APPEARANCE });
+
+  const setSelectedCueId = (cueId) => {
+    setSelectedCueIdState(cueId);
+    setSelectedCueIds(cueId ? [cueId] : []);
+  };
+
+  const availableCueTypes = [...ALL_CUE_TYPES, ...customCueTypes.map((definition) => definition.id)];
+  const cueToolButtons = [
+    TOOL_BUTTONS[0],
+    ...TOOL_BUTTONS.slice(1),
+    ...customCueTypes.map((definition) => ({
+      type: definition.id,
+      label: definition.name,
+      icon: CUSTOM_CUE_ICON_PATHS[definition.icon] || CUSTOM_CUE_ICON_PATHS[getDefaultCustomCueIcon(definition.kind)],
+    })),
+  ];
+  const getCustomCueDefinition = (type) => customCueTypes.find((definition) => definition.id === type);
+  const getDisplayCueTypeName = (type) => getCustomCueDefinition(type)?.name || getCueTypeName(type);
+  const getDisplayCueTypeLabel = (type) => getCustomCueDefinition(type)?.name || getCueTypeOptionLabel(type);
+  const getCueDisplayText = (cue) => {
+    const definition = getCustomCueDefinition(cue.type);
+    return `${definition?.prefix || ""}${cue.label}${definition?.suffix || ""}`;
+  };
+
+  const getTypeProperties = (type) => ({
+    color: colors[type] || colors[getCueBaseType(type)] || "#000000",
+    margin: margins[type] ?? margins[getCueBaseType(type)],
+    style: { ...(styles[type] || styles[getCueBaseType(type)] || { textSize: 20, lineWidth: 1.5 }) },
+    blockAppearance: { ...(getCustomCueDefinition(type)?.blockAppearance || blockAppearance) },
   });
 
-  const [colors, setColors] = useState({
-    POINTER: "#5b6474",
-    SFX: "#cc00cc",
-    TM: "#0000ff",
-    DCA: "#ff0000",
-    FADE: "#008000",
-    BLOCK: "#c9c9c9",
-    NOTE: "#8a2be2",
-    WARN: "#ff8c00",
-    MARK: "#00a6a6",
-  });
+  const compactCueProperties = useCallback((type, properties = {}) => {
+    const defaults = {
+      color: colors[type] || colors[getCueBaseType(type)] || "#000000",
+      margin: margins[type] ?? margins[getCueBaseType(type)],
+      style: { ...(styles[type] || styles[getCueBaseType(type)] || { textSize: 20, lineWidth: 1.5 }) },
+      blockAppearance: { ...(customCueTypes.find((definition) => definition.id === type)?.blockAppearance || blockAppearance) },
+    };
+    const compact = {};
+    for (const key of ["color", "margin"]) {
+      if (key in properties && !Object.is(properties[key], defaults[key])) compact[key] = properties[key];
+    }
+    for (const section of ["style", "blockAppearance"]) {
+      const overrides = Object.fromEntries(Object.entries(properties[section] || {})
+        .filter(([key, value]) => !Object.is(value, defaults[section][key])));
+      if (Object.keys(overrides).length) compact[section] = overrides;
+    }
+    return compact;
+  }, [blockAppearance, colors, customCueTypes, margins, styles]);
 
-  const [styles, setStyles] = useState({
-    POINTER: { textSize: 20, lineWidth: 1.5 },
-    SFX: { textSize: 20, lineWidth: 1.5 },
-    TM: { textSize: 20, lineWidth: 1.5 },
-    DCA: { textSize: 20, lineWidth: 1.5 },
-    FADE: { textSize: 20, lineWidth: 1.5 },
-    BLOCK: { textSize: 20, lineWidth: 1.5 },
-    NOTE: { textSize: 20, lineWidth: 1.5 },
-    WARN: { textSize: 20, lineWidth: 1.5 },
-    MARK: { textSize: 20, lineWidth: 1.5 },
-  });
+  const getCueProperties = (cue) => {
+    const defaults = getTypeProperties(cue.type);
+    if (!cue.customPropertiesEnabled || !cue.customProperties) return defaults;
+    return {
+      ...defaults,
+      ...cue.customProperties,
+      style: { ...defaults.style, ...(cue.customProperties.style || {}) },
+      blockAppearance: { ...defaults.blockAppearance, ...(cue.customProperties.blockAppearance || {}) },
+    };
+  };
 
-  const [blockAppearance, setBlockAppearance] = useState({
-    fillColor: "#ffffff",
-    fillOpacity: 0.25,
-    lineEnabled: true,
-    fillEnabled: true,
-  });
+  const setCuePropertyOverride = (cueId, section, key, value) => {
+    setCues((current) => current.map((cue) => {
+      if (cue.id !== cueId) return cue;
+      const defaults = getTypeProperties(cue.type);
+      const defaultValue = section ? defaults[section][key] : defaults[key];
+      const customProperties = compactCueProperties(cue.type, cue.customProperties);
+
+      if (section) {
+        const sectionOverrides = { ...(customProperties[section] || {}) };
+        if (Object.is(value, defaultValue)) delete sectionOverrides[key];
+        else sectionOverrides[key] = value;
+        if (Object.keys(sectionOverrides).length) customProperties[section] = sectionOverrides;
+        else delete customProperties[section];
+      } else if (Object.is(value, defaultValue)) {
+        delete customProperties[key];
+      } else {
+        customProperties[key] = value;
+      }
+
+      const hasOverrides = Object.keys(customProperties).length > 0;
+      return {
+        ...cue,
+        customPropertiesEnabled: hasOverrides,
+        customProperties: hasOverrides ? customProperties : undefined,
+      };
+    }));
+    markDirty();
+  };
 
   const markDirty = () => setIsDirty(true);
 
@@ -251,13 +453,17 @@ export default function App() {
       version: 1,
       savedAt: new Date().toISOString(),
       pdfBase64: arrayBufferToBase64(pdfBytes),
-      cues,
+      cues: cues.map((cue) => ({
+        ...cue,
+        customProperties: compactCueProperties(cue.type, cue.customProperties),
+      })),
       margins,
       colors,
       styles,
       blockAppearance,
       documentName,
       hiddenCueTypes,
+      customCueTypes,
       notesPageSide,
       callingPageSide,
       dividers: dividers.filter((divider) => isUnitPosition(divider.position)),
@@ -284,20 +490,50 @@ export default function App() {
 
     await loadPdf(pdfFile);
 
-    setCues(project.cues || []);
+    const legacyCueTypes = [
+      { oldType: "WARN", id: "CUSTOM_NOTE_LEGACY_WARN", name: "Warn", icon: "alert" },
+      { oldType: "MARK", id: "CUSTOM_NOTE_LEGACY_MARK", name: "Mark", icon: "marker" },
+    ].filter(({ oldType }) => (project.cues || []).some((cue) => cue.type === oldType));
+    const migratedCustomCueTypes = [...(project.customCueTypes || [])];
+    legacyCueTypes.forEach(({ oldType, id, name, icon }) => {
+      if (!migratedCustomCueTypes.some((definition) => definition.id === id)) {
+        migratedCustomCueTypes.push({ id, name, kind: "NOTE", icon, legacyType: oldType });
+      }
+    });
+    const legacyTypeMap = Object.fromEntries(legacyCueTypes.map(({ oldType, id }) => [oldType, id]));
+    const migratedCues = (project.cues || []).map((cue) => legacyTypeMap[cue.type] ? { ...cue, type: legacyTypeMap[cue.type] } : cue);
+    const migratedColors = { ...(project.colors || {}) };
+    const migratedStyles = { ...(project.styles || {}) };
+    const migratedHiddenCueTypes = { ...(project.hiddenCueTypes || {}) };
+    legacyCueTypes.forEach(({ oldType, id }) => {
+      migratedColors[id] = migratedColors[oldType] || (oldType === "WARN" ? "#ff8c00" : "#00a6a6");
+      migratedStyles[id] = { ...(migratedStyles[oldType] || { textSize: 20, lineWidth: 1.5 }) };
+      migratedHiddenCueTypes[id] = Boolean(migratedHiddenCueTypes[oldType]);
+      delete migratedHiddenCueTypes[oldType];
+    });
+
+    setCues(migratedCues);
     setUndoStack([]);
     setRedoStack([]);
     setDocumentName(project.documentName || "Untitled");
     setMargins(project.margins || margins);
-    setColors((current) => ({ ...current, ...(project.colors || {}) }));
-    setStyles((current) => ({ ...current, ...(project.styles || {}) }));
+    setColors((current) => ({ ...current, ...migratedColors }));
+    setStyles((current) => ({ ...current, ...migratedStyles }));
     setBlockAppearance((current) => ({
       ...current,
       ...(project.blockAppearance || {}),
     }));
     setHiddenCueTypes((current) => ({
       ...current,
-      ...(project.hiddenCueTypes || {}),
+      ...migratedHiddenCueTypes,
+    }));
+    setCustomCueTypes(migratedCustomCueTypes.map((definition) => ({
+      ...definition,
+      icon: definition.icon || getDefaultCustomCueIcon(definition.kind),
+    })));
+    setCueTypeFilters((current) => ({
+      ...current,
+      ...Object.fromEntries(migratedCustomCueTypes.map((definition) => [definition.id, true])),
     }));
     setNotesPageSide(project.notesPageSide || "off");
     setCallingPageSide(project.notesPageSide && project.notesPageSide !== "off"
@@ -421,6 +657,7 @@ export default function App() {
       styles,
       blockAppearance,
       hiddenCueTypes,
+      customCueTypes,
       documentName,
       notesPageSide,
       callingPageSide,
@@ -430,7 +667,7 @@ export default function App() {
       dividerAppearance,
       headerAppearance,
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     const saveSession = async () => {
@@ -443,12 +680,16 @@ export default function App() {
           version: 1,
           savedAt: new Date().toISOString(),
           pdfBase64: arrayBufferToBase64(latest.pdfBytes),
-          cues: latest.cues,
+          cues: latest.cues.map((cue) => ({
+            ...cue,
+            customProperties: compactCueProperties(cue.type, cue.customProperties),
+          })),
           margins: latest.margins,
           colors: latest.colors,
           styles: latest.styles,
           blockAppearance: latest.blockAppearance,
           hiddenCueTypes: latest.hiddenCueTypes,
+          customCueTypes: latest.customCueTypes,
           documentName: latest.documentName,
           notesPageSide: latest.notesPageSide,
           callingPageSide: latest.callingPageSide,
@@ -478,7 +719,7 @@ export default function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance, compactCueProperties]);
 
   useEffect(() => {
     if (restoreAttemptedRef.current) return;
@@ -549,7 +790,8 @@ export default function App() {
         pushUndo(cues);
         markDirty();
 
-        setCues((prev) => prev.filter((cue) => cue.id !== selectedCueId));
+        const selectedIds = new Set(selectedCueIds.length ? selectedCueIds : [selectedCueId]);
+        setCues((prev) => prev.filter((cue) => !selectedIds.has(cue.id)));
         setSelectedCueId(null);
         setSelectedDividerId(null);
         setSelectedHeaderId(null);
@@ -569,24 +811,21 @@ export default function App() {
 
       const key = e.key.toLowerCase();
 
-      if (["s", "t", "d", "n", "w", "m", "f", "b", "1", "2", "3", "4", "5", "6", "7", "8"].includes(key)) {
+      if (["s", "t", "d", "n", "f", "b", "1", "2", "3", "4", "5", "6"].includes(key)) {
         setFadeStart(null);
         setBlockStart(null);
       }
 
-      if (key === "s" || key === "1") setMode("SFX");
-      if (key === "t" || key === "2") setMode("TM");
-      if (key === "d" || key === "3") setMode("DCA");
-      if (key === "n" || key === "4") setMode("NOTE");
-      if (key === "w" || key === "5") setMode("WARN");
-      if (key === "m" || key === "6") setMode("MARK");
-      if (key === "f" || key === "7") setMode("FADE");
-      if (key === "b" || key === "8") setMode("BLOCK");
+      const shortcutType = {
+        s: "SFX", 1: "SFX", t: "TM", 2: "TM", d: "DCA", 3: "DCA",
+        n: "NOTE", 4: "NOTE", f: "FADE", 5: "FADE", b: "BLOCK", 6: "BLOCK",
+      }[key];
+      if (shortcutType && !hiddenCueTypes[shortcutType]) setMode(shortcutType);
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undoStack, redoStack, cues, selectedCueId, selectedDividerId, selectedHeaderId, dividersLocked]);
+  }, [undoStack, redoStack, cues, selectedCueId, selectedCueIds, selectedDividerId, selectedHeaderId, dividersLocked, hiddenCueTypes]);
 
   useEffect(() => {
     const warnBeforeUnload = (event) => {
@@ -726,7 +965,7 @@ export default function App() {
       return;
     }
 
-    if (mode === "BLOCK") {
+    if (isBlockCue(mode)) {
       if (!blockStart || blockStart.page !== pageIndex) {
         setBlockStart({ page: pageIndex, x, y });
         return;
@@ -748,14 +987,14 @@ export default function App() {
           bottom: Math.max(start.y, y),
           x: Math.min(start.x, x),
           y: Math.min(start.y, y),
-          type: "BLOCK",
+          type: mode,
           label: "",
         },
       ]);
       return;
     }
 
-    const label = prompt(`Enter ${getCueTypeName(mode)} Cue:`);
+    const label = prompt(`Enter ${getDisplayCueTypeName(mode)} Cue:`);
     if (!label) return;
 
     pushUndo(cues);
@@ -782,7 +1021,7 @@ export default function App() {
 
     const newLabel = prompt("Edit Cue:", cue.label);
     if (newLabel === null) return;
-    if (!newLabel && cue.type !== "FADE" && cue.type !== "BLOCK") return;
+    if (!newLabel && cue.type !== "FADE" && !isBlockCue(cue.type)) return;
 
     pushUndo(cues);
     markDirty();
@@ -792,13 +1031,28 @@ export default function App() {
     );
   };
 
+  const getCueSurfacePoint = (clientX, clientY, fallbackSvg) => {
+    const targetSvg = document.elementsFromPoint(clientX, clientY)
+      .find((element) => element.matches?.("svg[data-cue-page-index]")) || fallbackSvg;
+    if (!targetSvg) return null;
+
+    const rect = targetSvg.getBoundingClientRect();
+    const scaleX = targetSvg.viewBox.baseVal.width / rect.width;
+    const scaleY = targetSvg.viewBox.baseVal.height / rect.height;
+    const coordinateOffset = Number(targetSvg.dataset.coordinateOffset || 0);
+    return {
+      page: Number(targetSvg.dataset.cuePageIndex),
+      x: (clientX - rect.left) * scaleX - coordinateOffset,
+      y: (clientY - rect.top) * scaleY,
+    };
+  };
+
   const startDragCueLine = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
-    const rect = svg.getBoundingClientRect();
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     let didMove = false;
@@ -808,15 +1062,12 @@ export default function App() {
       const deltaY = Math.abs(ev.clientY - startClientY);
       if (deltaX > 2 || deltaY > 2) didMove = true;
 
-      const scaleX = svg.viewBox.baseVal.width / rect.width;
-      const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
-      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
-      const newY = (ev.clientY - rect.top) * scaleY;
+      const point = getCueSurfacePoint(ev.clientX, ev.clientY, svg);
+      if (!point) return;
 
       setCues((prev) =>
         prev.map((c) =>
-          c.id === cueId ? { ...c, x: newX, y: newY } : c
+          c.id === cueId ? { ...c, page: point.page, x: point.x, y: point.y } : c
         )
       );
     };
@@ -846,7 +1097,6 @@ export default function App() {
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
-    const rect = svg.getBoundingClientRect();
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     let didMove = false;
@@ -856,14 +1106,11 @@ export default function App() {
       const deltaY = Math.abs(ev.clientY - startClientY);
       if (deltaX > 2 || deltaY > 2) didMove = true;
 
-      const scaleX = svg.viewBox.baseVal.width / rect.width;
-      const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const coordinateOffset = Number(svg.dataset.coordinateOffset || 0);
-      const newX = (ev.clientX - rect.left) * scaleX - coordinateOffset;
-      const newY = (ev.clientY - rect.top) * scaleY;
+      const point = getCueSurfacePoint(ev.clientX, ev.clientY, svg);
+      if (!point) return;
 
       setCues((prev) =>
-        prev.map((c) => (c.id === cueId ? { ...c, x: newX, y: newY } : c))
+        prev.map((c) => (c.id === cueId ? { ...c, page: point.page, x: point.x, y: point.y } : c))
       );
     };
 
@@ -892,21 +1139,19 @@ export default function App() {
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
-    const rect = svg.getBoundingClientRect();
     const startClientY = e.clientY;
     let didMove = false;
 
     const move = (ev) => {
       if (Math.abs(ev.clientY - startClientY) > 2) didMove = true;
 
-      const scaleY = svg.viewBox.baseVal.height / rect.height;
-      const newY = Math.max(
-        0,
-        Math.min(svg.viewBox.baseVal.height, (ev.clientY - rect.top) * scaleY)
-      );
+      const point = getCueSurfacePoint(ev.clientX, ev.clientY, svg);
+      if (!point) return;
+      const targetHeight = pages[point.page]?.height || svg.viewBox.baseVal.height;
+      const newY = Math.max(0, Math.min(targetHeight, point.y));
 
       setCues((prev) =>
-        prev.map((cue) => cue.id === cueId ? { ...cue, y: newY } : cue)
+        prev.map((cue) => cue.id === cueId ? { ...cue, page: point.page, y: newY } : cue)
       );
     };
 
@@ -936,22 +1181,28 @@ export default function App() {
     if (!original) return;
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
-    const rect = svg.getBoundingClientRect();
-    const scaleX = svg.viewBox.baseVal.width / rect.width;
-    const scaleY = svg.viewBox.baseVal.height / rect.height;
+    const startPoint = getCueSurfacePoint(e.clientX, e.clientY, svg);
+    if (!startPoint) return;
+    const grabOffsetX = startPoint.x - original.x;
+    const grabOffsetY = startPoint.y - original.y;
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     let didMove = false;
 
     const move = (event) => {
-      const dx = (event.clientX - startClientX) * scaleX;
-      const dy = (event.clientY - startClientY) * scaleY;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didMove = true;
+      const point = getCueSurfacePoint(event.clientX, event.clientY, svg);
+      if (!point) return;
+      const nextX = point.x - grabOffsetX;
+      const nextY = point.y - grabOffsetY;
+      const dx = nextX - original.x;
+      const dy = nextY - original.y;
+      if (Math.abs(event.clientX - startClientX) > 2 || Math.abs(event.clientY - startClientY) > 2) didMove = true;
 
       setCues((current) => current.map((cue) =>
         cue.id === cueId
           ? {
               ...cue,
+              page: point.page,
               x: original.x + dx,
               y: original.y + dy,
               x2: original.x2 + dx,
@@ -1023,18 +1274,24 @@ export default function App() {
     if (!original) return;
     const snapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
-    const rect = svg.getBoundingClientRect();
-    const scaleX = svg.viewBox.baseVal.width / rect.width;
-    const scaleY = svg.viewBox.baseVal.height / rect.height;
+    const startPoint = getCueSurfacePoint(e.clientX, e.clientY, svg);
+    if (!startPoint) return;
+    const grabOffsetX = startPoint.x - original.left;
+    const grabOffsetY = startPoint.y - original.top;
     const startX = e.clientX;
     const startY = e.clientY;
     let moved = false;
     const move = (event) => {
-      const dx = (event.clientX - startX) * scaleX;
-      const dy = (event.clientY - startY) * scaleY;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+      const point = getCueSurfacePoint(event.clientX, event.clientY, svg);
+      if (!point) return;
+      const nextLeft = point.x - grabOffsetX;
+      const nextTop = point.y - grabOffsetY;
+      const dx = nextLeft - original.left;
+      const dy = nextTop - original.top;
+      if (Math.abs(event.clientX - startX) > 2 || Math.abs(event.clientY - startY) > 2) moved = true;
       setCues((current) => current.map((cue) => cue.id === cueId ? {
         ...cue,
+        page: point.page,
         left: original.left + dx,
         right: original.right + dx,
         top: original.top + dy,
@@ -1137,19 +1394,22 @@ export default function App() {
         const viewport = {
           convertToPdfPoint: (x, y) => baseViewport.convertToPdfPoint(x + xOffset, y),
         };
-        const cueStyle = styles[cue.type] || { textSize: 10, lineWidth: 1.5 };
+        const cueProperties = getCueProperties(cue);
+        const cueStyle = cueProperties.style;
+        const cueText = getCueDisplayText(cue);
 
-        const hex = colors[cue.type] || "#000000";
+        const hex = cueProperties.color;
         const r = parseInt(hex.slice(1, 3), 16) / 255;
         const g = parseInt(hex.slice(3, 5), 16) / 255;
         const b = parseInt(hex.slice(5, 7), 16) / 255;
         const color = rgb(r, g, b);
 
-        if (cue.type === "BLOCK") {
+        if (isBlockCue(cue.type)) {
           const [pdfLeft, pdfBottom] = viewport.convertToPdfPoint(cue.left, cue.bottom);
           const [pdfRight, pdfTop] = viewport.convertToPdfPoint(cue.right, cue.top);
           const [labelX, labelY] = viewport.convertToPdfPoint(cue.left, cue.top - 6);
-          const fillHex = blockAppearance.fillColor;
+          const cueBlockAppearance = cueProperties.blockAppearance;
+          const fillHex = cueBlockAppearance.fillColor;
           const fillColor = rgb(
             parseInt(fillHex.slice(1, 3), 16) / 255,
             parseInt(fillHex.slice(3, 5), 16) / 255,
@@ -1161,20 +1421,20 @@ export default function App() {
             width: Math.abs(pdfRight - pdfLeft),
             height: Math.abs(pdfTop - pdfBottom),
           };
-          if (blockAppearance.fillEnabled) {
+          if (cueBlockAppearance.fillEnabled) {
             rectangleOptions.color = fillColor;
-            rectangleOptions.opacity = blockAppearance.fillOpacity;
+            rectangleOptions.opacity = cueBlockAppearance.fillOpacity;
           }
-          if (blockAppearance.lineEnabled) {
+          if (cueBlockAppearance.lineEnabled) {
             rectangleOptions.borderColor = color;
             const [widthStart] = viewport.convertToPdfPoint(0, 0);
             const [widthEnd] = viewport.convertToPdfPoint(cueStyle.lineWidth, 0);
             rectangleOptions.borderWidth = Math.abs(widthEnd - widthStart);
           }
-          if (blockAppearance.fillEnabled || blockAppearance.lineEnabled) {
+          if (cueBlockAppearance.fillEnabled || cueBlockAppearance.lineEnabled) {
             page.drawRectangle(rectangleOptions);
           }
-          page.drawText(cue.label, {
+          page.drawText(cueText, {
             x: labelX,
             y: labelY,
             size: cueStyle.textSize,
@@ -1189,7 +1449,7 @@ export default function App() {
           const [endX, endY] = viewport.convertToPdfPoint(cue.x2, cue.y2);
           const fadeText = getFadeTextPosition(cue, cueStyle.textSize);
           const [textCenterX, textY] = viewport.convertToPdfPoint(fadeText.x, fadeText.y);
-          const textWidth = font.widthOfTextAtSize(cue.label, cueStyle.textSize);
+          const textWidth = font.widthOfTextAtSize(cueText, cueStyle.textSize);
           const [lineWidthStartX] = viewport.convertToPdfPoint(0, 0);
           const [lineWidthEndX] = viewport.convertToPdfPoint(cueStyle.lineWidth, 0);
 
@@ -1198,8 +1458,9 @@ export default function App() {
             end: { x: endX, y: endY },
             color,
             thickness: Math.abs(lineWidthEndX - lineWidthStartX),
+            lineCap: LineCapStyle.Projecting,
           });
-          page.drawText(cue.label, {
+          page.drawText(cueText, {
             x: textCenterX - textWidth / 2,
             y: textY,
             size: cueStyle.textSize,
@@ -1212,7 +1473,7 @@ export default function App() {
         if (isFreeCue(cue.type)) {
           const [textX, textY] = viewport.convertToPdfPoint(cue.x, cue.y);
 
-          page.drawText(cue.label, {
+          page.drawText(cueText, {
             x: textX,
             y: textY,
             size: cueStyle.textSize,
@@ -1223,8 +1484,9 @@ export default function App() {
           return;
         }
 
-        const marginX = margins[cue.type];
-        const lineHeight = 10;
+        const marginX = cueProperties.margin;
+        const marginCueLayout = getMarginCueLayout(cue, marginX, cueStyle);
+        const lineHeight = marginCueLayout.markerHalfHeight;
 
         const [vTopX, vTopY] = viewport.convertToPdfPoint(
           cue.x,
@@ -1238,18 +1500,20 @@ export default function App() {
 
         const [hStartX, hStartY] = viewport.convertToPdfPoint(
           cue.x,
-          cue.y + lineHeight
+          marginCueLayout.lineY
         );
 
         const [hEndX, hEndY] = viewport.convertToPdfPoint(
           marginX,
-          cue.y + lineHeight
+          marginCueLayout.lineY
         );
 
-        const [textX, textY] = viewport.convertToPdfPoint(
-          marginX + 5,
-          cue.y + 5
+        const [textAnchorX, textY] = viewport.convertToPdfPoint(
+          marginCueLayout.textX,
+          marginCueLayout.textY
         );
+        const textWidth = font.widthOfTextAtSize(cueText, cueStyle.textSize);
+        const textX = marginCueLayout.textAnchor === "end" ? textAnchorX - textWidth : textAnchorX;
 
         const [lineWidthStartX] = viewport.convertToPdfPoint(0, 0);
         const [lineWidthEndX] = viewport.convertToPdfPoint(
@@ -1259,22 +1523,30 @@ export default function App() {
         const pdfLineWidth = Math.abs(lineWidthEndX - lineWidthStartX);
 
         if (hasLines(cue.type)) {
-          page.drawLine({
-            start: { x: vTopX, y: vTopY },
-            end: { x: vBottomX, y: vBottomY },
-            color,
-            thickness: pdfLineWidth,
-          });
+          const cueLineVisible = cueStyle.viewCueLine !== false;
+          const cuePointVisible = cueLineVisible && cueStyle.viewCuePoint !== false;
+          if (cuePointVisible) {
+            page.drawLine({
+              start: { x: vTopX, y: vTopY },
+              end: { x: vBottomX, y: vBottomY },
+              color,
+              thickness: pdfLineWidth,
+              lineCap: LineCapStyle.Projecting,
+            });
+          }
 
-          page.drawLine({
-            start: { x: hStartX, y: hStartY },
-            end: { x: hEndX, y: hEndY },
-            color,
-            thickness: pdfLineWidth,
-          });
+          if (cueLineVisible) {
+            page.drawLine({
+              start: { x: hStartX, y: hStartY },
+              end: { x: hEndX, y: hEndY },
+              color,
+              thickness: pdfLineWidth,
+              lineCap: LineCapStyle.Projecting,
+            });
+          }
         }
 
-        page.drawText(cue.label, {
+        page.drawText(cueText, {
           x: textX,
           y: textY,
           size: cueStyle.textSize,
@@ -1378,10 +1650,24 @@ export default function App() {
     markDirty();
   };
 
-  const jumpToCue = (cue) => {
+  const updateCueSelection = (cueId, additive) => {
     setSelectedDividerId(null);
     setSelectedHeaderId(null);
-    setSelectedCueId(cue.id);
+    if (!additive) {
+      setSelectedCueId(cueId);
+      return;
+    }
+    setSelectedCueIds((current) => {
+      const next = current.includes(cueId) ? current.filter((id) => id !== cueId) : [...current, cueId];
+      setSelectedCueIdState(next.at(-1) || null);
+      return next;
+    });
+  };
+
+  const jumpToCue = (cue, event) => {
+    setSelectedDividerId(null);
+    setSelectedHeaderId(null);
+    updateCueSelection(cue.id, Boolean(event?.ctrlKey || event?.metaKey));
     cueRefs.current[cue.id]?.scrollIntoView({
       behavior: "smooth",
       block: "center",
@@ -1394,22 +1680,21 @@ export default function App() {
       suppressNextSvgClickRef.current = false;
       return;
     }
-    setSelectedDividerId(null);
-    setSelectedHeaderId(null);
-    setSelectedCueId(cueId);
+    updateCueSelection(cueId, e.ctrlKey || e.metaKey);
   };
 
   const filteredCues = cues
     .filter((cue) => {
-      if (!cueTypeFilters[cue.type]) return false;
+      if (cueTypeFilters[cue.type] === false) return false;
+      if (showCustomCuesOnly && !cue.customPropertiesEnabled) return false;
 
       const q = search.toLowerCase();
 
       return (
-        cue.label.toLowerCase().includes(q) ||
+        getCueDisplayText(cue).toLowerCase().includes(q) ||
         cue.type.toLowerCase().includes(q) ||
-        getCueTypeName(cue.type).toLowerCase().includes(q) ||
-        getCueTypeAbbreviation(cue.type).toLowerCase().includes(q) ||
+        getDisplayCueTypeName(cue.type).toLowerCase().includes(q) ||
+        getDisplayCueTypeLabel(cue.type).toLowerCase().includes(q) ||
         String(cue.page + 1).includes(q)
       );
     })
@@ -1435,7 +1720,7 @@ export default function App() {
   const showAllCueTypes = () => {
     setCueTypeFilters(
       Object.fromEntries(
-        ALL_CUE_TYPES.map((type) => [type, true])
+        availableCueTypes.map((type) => [type, true])
       )
     );
   };
@@ -1443,52 +1728,64 @@ export default function App() {
   const hideAllCueTypes = () => {
     setCueTypeFilters(
       Object.fromEntries(
-        ALL_CUE_TYPES.map((type) => [type, false])
+        availableCueTypes.map((type) => [type, false])
       )
     );
   };
 
-  const renderCueTypeOptions = (type) => (
+  const renderCueTypeOptions = (type) => {
+    const customDefinition = getCustomCueDefinition(type);
+    const typeBlockAppearance = customDefinition?.blockAppearance || blockAppearance;
+    const appDefaultStyle = DEFAULT_STYLES[type];
+    const isBuiltInType = ALL_CUE_TYPES.includes(type);
+    const typeResetButton = (propertyName, onReset, isAtDefault) => isBuiltInType ? (
+      <button type="button" className="inspector-property-reset" title={isAtDefault ? `${propertyName} already matches the app default` : `Reset ${propertyName} to app default`} aria-label={`Reset ${propertyName} to app default`} disabled={isAtDefault} onClick={onReset}>
+        <MaterialIcon path={mdiArrowULeftTop} />
+      </button>
+    ) : null;
+    const updateTypeBlockAppearance = (updates) => {
+      const definition = getCustomCueDefinition(type);
+      if (definition) {
+        setCustomCueTypes((current) => current.map((item) => item.id === type
+          ? { ...item, blockAppearance: { ...item.blockAppearance, ...updates } }
+          : item));
+      } else {
+        setBlockAppearance((current) => ({ ...current, ...updates }));
+      }
+      markDirty();
+    };
+    return (
     <div className="accordion-options" style={{ "--cue-color": colors[type] }}>
-      <label className="hide-cue-type-option">
-        <span>Hide this cue type</span>
-        <input
-          type="checkbox"
-          checked={hiddenCueTypes[type]}
-          onChange={(e) => {
-            setHiddenCueTypes((current) => ({ ...current, [type]: e.target.checked }));
-            setSelectedCueId(null);
-            if (e.target.checked && mode === type) setMode("POINTER");
-            markDirty();
-          }}
-        />
-      </label>
       {type === "FADE" && <p>{fadeStart ? "Click the fade end point" : "Click the fade start point"}</p>}
-      {type === "BLOCK" && <p>{blockStart ? "Click the opposite corner" : "Click the first corner"}</p>}
+      {isBlockCue(type) && <p>{blockStart ? "Click the opposite corner" : "Click the first corner"}</p>}
 
-      {type !== "BLOCK" && (
+      {customDefinition && <>
+        <label>Text prefix <input className="cue-affix-input" type="text" value={customDefinition.prefix || ""} placeholder="None" onChange={(event) => { const prefix = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === type ? { ...item, prefix } : item)); markDirty(); }} /></label>
+        <label>Text suffix <input className="cue-affix-input" type="text" value={customDefinition.suffix || ""} placeholder="None" onChange={(event) => { const suffix = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === type ? { ...item, suffix } : item)); markDirty(); }} /></label>
+      </>}
+
+      {!isBlockCue(type) && (
         <label>
           Colour
-          <input
-            type="color"
+          <span className="cue-option-control"><PaletteColorInput
             value={colors[type]}
-            onChange={(e) => {
-              setColors((current) => ({ ...current, [type]: e.target.value }));
+            onCommit={(value) => {
+              setColors((current) => ({ ...current, [type]: value }));
               markDirty();
             }}
-          />
+          />{typeResetButton("colour", () => { setColors((current) => ({ ...current, [type]: DEFAULT_COLORS[type] })); markDirty(); }, colors[type] === DEFAULT_COLORS[type])}</span>
         </label>
       )}
 
-      {type === "BLOCK" && (
+      {isBlockCue(type) && (
         <>
-          <label>Line <input type="color" value={colors.BLOCK} disabled={!blockAppearance.lineEnabled} onChange={(e) => { setColors((current) => ({ ...current, BLOCK: e.target.value })); markDirty(); }} /></label>
-          <label><span>No line</span><input type="checkbox" checked={!blockAppearance.lineEnabled} onChange={(e) => { setBlockAppearance((current) => ({ ...current, lineEnabled: !e.target.checked })); markDirty(); }} /></label>
-          <label>Fill <input type="color" value={blockAppearance.fillColor} disabled={!blockAppearance.fillEnabled} onChange={(e) => { setBlockAppearance((current) => ({ ...current, fillColor: e.target.value })); markDirty(); }} /></label>
-          <label><span>No fill</span><input type="checkbox" checked={!blockAppearance.fillEnabled} onChange={(e) => { setBlockAppearance((current) => ({ ...current, fillEnabled: !e.target.checked })); markDirty(); }} /></label>
+          <label>Line <span className="cue-option-control"><PaletteColorInput value={colors[type]} disabled={!typeBlockAppearance.lineEnabled} onCommit={(value) => { setColors((current) => ({ ...current, [type]: value })); markDirty(); }} />{typeResetButton("line colour", () => { setColors((current) => ({ ...current, [type]: DEFAULT_COLORS[type] })); markDirty(); }, colors[type] === DEFAULT_COLORS[type])}</span></label>
+          <label><span>No line</span><span className="cue-option-control"><input type="checkbox" checked={!typeBlockAppearance.lineEnabled} onChange={(e) => updateTypeBlockAppearance({ lineEnabled: !e.target.checked })} />{typeResetButton("line visibility", () => updateTypeBlockAppearance({ lineEnabled: DEFAULT_BLOCK_APPEARANCE.lineEnabled }), typeBlockAppearance.lineEnabled === DEFAULT_BLOCK_APPEARANCE.lineEnabled)}</span></label>
+          <label>Fill <span className="cue-option-control"><PaletteColorInput value={typeBlockAppearance.fillColor} disabled={!typeBlockAppearance.fillEnabled} onCommit={(value) => updateTypeBlockAppearance({ fillColor: value })} />{typeResetButton("fill colour", () => updateTypeBlockAppearance({ fillColor: DEFAULT_BLOCK_APPEARANCE.fillColor }), typeBlockAppearance.fillColor === DEFAULT_BLOCK_APPEARANCE.fillColor)}</span></label>
+          <label><span>No fill</span><span className="cue-option-control"><input type="checkbox" checked={!typeBlockAppearance.fillEnabled} onChange={(e) => updateTypeBlockAppearance({ fillEnabled: !e.target.checked })} />{typeResetButton("fill visibility", () => updateTypeBlockAppearance({ fillEnabled: DEFAULT_BLOCK_APPEARANCE.fillEnabled }), typeBlockAppearance.fillEnabled === DEFAULT_BLOCK_APPEARANCE.fillEnabled)}</span></label>
           <label>
             Fill opacity
-            <span className="option-slider"><input type="range" min="0" max="1" step="0.05" value={blockAppearance.fillOpacity} disabled={!blockAppearance.fillEnabled} onChange={(e) => { setBlockAppearance((current) => ({ ...current, fillOpacity: parseFloat(e.target.value) })); markDirty(); }} />{Math.round(blockAppearance.fillOpacity * 100)}%</span>
+            <span className="cue-option-control"><span className="option-slider"><input type="range" min="0" max="1" step="0.05" value={typeBlockAppearance.fillOpacity} disabled={!typeBlockAppearance.fillEnabled} onChange={(e) => updateTypeBlockAppearance({ fillOpacity: parseFloat(e.target.value) })} />{Math.round(typeBlockAppearance.fillOpacity * 100)}%</span>{typeResetButton("fill opacity", () => updateTypeBlockAppearance({ fillOpacity: DEFAULT_BLOCK_APPEARANCE.fillOpacity }), typeBlockAppearance.fillOpacity === DEFAULT_BLOCK_APPEARANCE.fillOpacity)}</span>
           </label>
         </>
       )}
@@ -1496,23 +1793,181 @@ export default function App() {
       {isMarginCue(type) && (
         <label>
           Margin
-          <span className="option-slider"><input type="range" min="0" max="600" value={margins[type]} onChange={(e) => { setMargins((current) => ({ ...current, [type]: parseInt(e.target.value, 10) })); markDirty(); }} />{Math.round(margins[type])}</span>
+          <span className="cue-option-control"><span className="option-slider"><input type="range" min="0" max="600" value={margins[type]} onChange={(e) => { setMargins((current) => ({ ...current, [type]: parseInt(e.target.value, 10) })); markDirty(); }} />{Math.round(margins[type])}</span>{typeResetButton("margin", () => { setMargins((current) => ({ ...current, [type]: DEFAULT_MARGINS[type] })); markDirty(); }, margins[type] === DEFAULT_MARGINS[type])}</span>
         </label>
+      )}
+
+      {isPointCue(type) && (
+        <>
+          <label>
+            <span>View Cue Line</span>
+            <span className="cue-option-control"><input type="checkbox" checked={styles[type].viewCueLine !== false} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], viewCueLine: e.target.checked } })); markDirty(); }} />{typeResetButton("cue line visibility", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], viewCueLine: appDefaultStyle.viewCueLine } })); markDirty(); }, styles[type].viewCueLine === appDefaultStyle?.viewCueLine)}</span>
+          </label>
+          <label className={styles[type].viewCueLine === false ? "is-disabled" : ""}>
+            <span>View Cue Point</span>
+            <span className="cue-option-control"><input type="checkbox" checked={styles[type].viewCuePoint !== false} disabled={styles[type].viewCueLine === false} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], viewCuePoint: e.target.checked } })); markDirty(); }} />{typeResetButton("cue point visibility", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], viewCuePoint: appDefaultStyle.viewCuePoint } })); markDirty(); }, styles[type].viewCuePoint === appDefaultStyle?.viewCuePoint)}</span>
+          </label>
+          <label>
+            Text position
+            <span className="cue-option-control"><select value={styles[type].textPosition || "above"} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], textPosition: e.target.value } })); markDirty(); }}>
+              <option value="above">Above cue line</option>
+              <option value="below">Below cue line</option>
+            </select>{typeResetButton("text position", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], textPosition: appDefaultStyle.textPosition } })); markDirty(); }, styles[type].textPosition === appDefaultStyle?.textPosition)}</span>
+          </label>
+          <label>
+            Cue line position
+            <span className="cue-option-control"><select value={styles[type].cueLinePosition || "below"} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], cueLinePosition: e.target.value } })); markDirty(); }}>
+              <option value="above">Above vertical cue line</option>
+              <option value="below">Below vertical cue line</option>
+            </select>{typeResetButton("cue line position", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], cueLinePosition: appDefaultStyle.cueLinePosition } })); markDirty(); }, styles[type].cueLinePosition === appDefaultStyle?.cueLinePosition)}</span>
+          </label>
+          <label>
+            Cue position
+            <span className="cue-option-control"><select value={styles[type].cueSide || "after"} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], cueSide: e.target.value } })); markDirty(); }}>
+              <option value="before">Before alignment guide</option>
+              <option value="after">After alignment guide</option>
+            </select>{typeResetButton("cue position", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], cueSide: appDefaultStyle.cueSide } })); markDirty(); }, styles[type].cueSide === appDefaultStyle?.cueSide)}</span>
+          </label>
+          <label>
+            Vertical marker height
+            <span className="cue-option-control"><span className="option-slider"><input type="range" min="4" max="100" step="2" value={styles[type].markerHeight || DEFAULT_CUE_MARKER_HEIGHT} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], markerHeight: parseFloat(e.target.value) } })); markDirty(); }} />{styles[type].markerHeight || DEFAULT_CUE_MARKER_HEIGHT}</span>{typeResetButton("vertical marker height", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], markerHeight: appDefaultStyle.markerHeight } })); markDirty(); }, styles[type].markerHeight === appDefaultStyle?.markerHeight)}</span>
+          </label>
+        </>
       )}
 
       <label>
         Text size
-        <span className="option-slider"><input type="range" min="6" max="28" step="1" value={styles[type].textSize} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], textSize: parseFloat(e.target.value) } })); markDirty(); }} />{styles[type].textSize}</span>
+        <span className="cue-option-control"><span className="option-slider"><input type="range" min="6" max="28" step="1" value={styles[type].textSize} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], textSize: parseFloat(e.target.value) } })); markDirty(); }} />{styles[type].textSize}</span>{typeResetButton("text size", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], textSize: appDefaultStyle.textSize } })); markDirty(); }, styles[type].textSize === appDefaultStyle?.textSize)}</span>
       </label>
 
-      {(hasLines(type) || type === "BLOCK") && (
+      {(hasLines(type) || isBlockCue(type)) && (
         <label>
           Line width
-          <span className="option-slider"><input type="range" min="0.5" max="8" step="0.5" value={styles[type].lineWidth} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], lineWidth: parseFloat(e.target.value) } })); markDirty(); }} />{styles[type].lineWidth}</span>
+          <span className="cue-option-control"><span className="option-slider"><input type="range" min="0.5" max="8" step="0.5" value={styles[type].lineWidth} onChange={(e) => { setStyles((current) => ({ ...current, [type]: { ...current[type], lineWidth: roundLineWidth(e.target.value) } })); markDirty(); }} /><output>{formatLineWidth(styles[type].lineWidth)}</output></span>{typeResetButton("line width", () => { setStyles((current) => ({ ...current, [type]: { ...current[type], lineWidth: appDefaultStyle.lineWidth } })); markDirty(); }, styles[type].lineWidth === appDefaultStyle?.lineWidth)}</span>
         </label>
       )}
+      <button
+        type="button"
+        className="reset-cue-properties-button"
+        onClick={() => {
+          if (!window.confirm(`Reset every ${getDisplayCueTypeName(type)} cue to the cue type properties? This will clear their saved custom properties.`)) return;
+          setCues((current) => current.map((cue) => cue.type === type
+            ? { ...cue, customPropertiesEnabled: false, customProperties: undefined }
+            : cue));
+          markDirty();
+        }}
+      >
+        Reset all {getDisplayCueTypeName(type)} cues to type properties
+      </button>
     </div>
-  );
+    );
+  };
+
+  const renderInspectorProperties = (cue) => {
+    const properties = getCueProperties(cue);
+    const typeProperties = getTypeProperties(cue.type);
+    const cueStyle = properties.style;
+    const cueBlockAppearance = properties.blockAppearance;
+    const updateRoot = (key, value) => setCuePropertyOverride(cue.id, null, key, value);
+    const updateStyle = (key, value) => setCuePropertyOverride(cue.id, "style", key, value);
+    const updateBlock = (key, value) => setCuePropertyOverride(cue.id, "blockAppearance", key, value);
+    const resetButton = (propertyName, onReset, isAtTypeValue) => (
+      <button type="button" className="inspector-property-reset" title={isAtTypeValue ? `${propertyName} already matches the cue type value` : `Reset ${propertyName} to cue type value`} aria-label={`Reset ${propertyName} to cue type value`} disabled={isAtTypeValue} onClick={onReset}>
+        <MaterialIcon path={mdiArrowULeftTop} />
+      </button>
+    );
+
+    return (
+      <fieldset className="inspector-properties">
+        {!isBlockCue(cue.type) ? (
+          <label><span>Colour</span><PaletteColorInput value={properties.color} onCommit={(value) => updateRoot("color", value)} />{resetButton("colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
+        ) : (
+          <>
+            <label><span>Line</span><PaletteColorInput value={properties.color} disabled={!cueBlockAppearance.lineEnabled} onCommit={(value) => updateRoot("color", value)} />{resetButton("line colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
+            <label><span>No line</span><input type="checkbox" checked={!cueBlockAppearance.lineEnabled} onChange={(e) => updateBlock("lineEnabled", !e.target.checked)} />{resetButton("line visibility", () => updateBlock("lineEnabled", typeProperties.blockAppearance.lineEnabled), cueBlockAppearance.lineEnabled === typeProperties.blockAppearance.lineEnabled)}</label>
+            <label><span>Fill</span><PaletteColorInput value={cueBlockAppearance.fillColor} disabled={!cueBlockAppearance.fillEnabled} onCommit={(value) => updateBlock("fillColor", value)} />{resetButton("fill colour", () => updateBlock("fillColor", typeProperties.blockAppearance.fillColor), cueBlockAppearance.fillColor === typeProperties.blockAppearance.fillColor)}</label>
+            <label><span>No fill</span><input type="checkbox" checked={!cueBlockAppearance.fillEnabled} onChange={(e) => updateBlock("fillEnabled", !e.target.checked)} />{resetButton("fill visibility", () => updateBlock("fillEnabled", typeProperties.blockAppearance.fillEnabled), cueBlockAppearance.fillEnabled === typeProperties.blockAppearance.fillEnabled)}</label>
+            <label><span>Fill opacity</span><span className="option-slider"><input type="range" min="0" max="1" step="0.05" value={cueBlockAppearance.fillOpacity} disabled={!cueBlockAppearance.fillEnabled} onChange={(e) => updateBlock("fillOpacity", parseFloat(e.target.value))} />{Math.round(cueBlockAppearance.fillOpacity * 100)}%</span>{resetButton("fill opacity", () => updateBlock("fillOpacity", typeProperties.blockAppearance.fillOpacity), cueBlockAppearance.fillOpacity === typeProperties.blockAppearance.fillOpacity)}</label>
+          </>
+        )}
+        {isMarginCue(cue.type) && (
+          <label><span>Margin</span><span className="option-slider"><input type="range" min="0" max="600" value={properties.margin} onChange={(e) => updateRoot("margin", parseInt(e.target.value, 10))} />{Math.round(properties.margin)}</span>{resetButton("margin", () => updateRoot("margin", typeProperties.margin), properties.margin === typeProperties.margin)}</label>
+        )}
+        {isPointCue(cue.type) && (
+          <>
+            <label><span>View Cue Line</span><input type="checkbox" checked={cueStyle.viewCueLine !== false} onChange={(e) => updateStyle("viewCueLine", e.target.checked)} />{resetButton("cue line visibility", () => updateStyle("viewCueLine", typeProperties.style.viewCueLine !== false), (cueStyle.viewCueLine !== false) === (typeProperties.style.viewCueLine !== false))}</label>
+            <label className={cueStyle.viewCueLine === false ? "is-disabled" : ""}><span>View Cue Point</span><input type="checkbox" checked={cueStyle.viewCuePoint !== false} disabled={cueStyle.viewCueLine === false} onChange={(e) => updateStyle("viewCuePoint", e.target.checked)} />{resetButton("cue point visibility", () => updateStyle("viewCuePoint", typeProperties.style.viewCuePoint !== false), (cueStyle.viewCuePoint !== false) === (typeProperties.style.viewCuePoint !== false))}</label>
+            <label><span>Text position</span><select value={cueStyle.textPosition || "above"} onChange={(e) => updateStyle("textPosition", e.target.value)}><option value="above">Above cue line</option><option value="below">Below cue line</option></select>{resetButton("text position", () => updateStyle("textPosition", typeProperties.style.textPosition || "above"), (cueStyle.textPosition || "above") === (typeProperties.style.textPosition || "above"))}</label>
+            <label><span>Cue line position</span><select value={cueStyle.cueLinePosition || "below"} onChange={(e) => updateStyle("cueLinePosition", e.target.value)}><option value="above">Above vertical cue line</option><option value="below">Below vertical cue line</option></select>{resetButton("cue line position", () => updateStyle("cueLinePosition", typeProperties.style.cueLinePosition || "below"), (cueStyle.cueLinePosition || "below") === (typeProperties.style.cueLinePosition || "below"))}</label>
+            <label><span>Cue position</span><select value={cueStyle.cueSide || "after"} onChange={(e) => updateStyle("cueSide", e.target.value)}><option value="before">Before alignment guide</option><option value="after">After alignment guide</option></select>{resetButton("cue position", () => updateStyle("cueSide", typeProperties.style.cueSide || "after"), (cueStyle.cueSide || "after") === (typeProperties.style.cueSide || "after"))}</label>
+            <label><span>Vertical marker height</span><span className="option-slider"><input type="range" min="4" max="100" step="2" value={cueStyle.markerHeight || DEFAULT_CUE_MARKER_HEIGHT} onChange={(e) => updateStyle("markerHeight", parseFloat(e.target.value))} />{cueStyle.markerHeight || DEFAULT_CUE_MARKER_HEIGHT}</span>{resetButton("vertical marker height", () => updateStyle("markerHeight", typeProperties.style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT), (cueStyle.markerHeight || DEFAULT_CUE_MARKER_HEIGHT) === (typeProperties.style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT))}</label>
+          </>
+        )}
+        <label><span>Text size</span><span className="option-slider"><input type="range" min="6" max="28" step="1" value={cueStyle.textSize} onChange={(e) => updateStyle("textSize", parseFloat(e.target.value))} />{cueStyle.textSize}</span>{resetButton("text size", () => updateStyle("textSize", typeProperties.style.textSize), cueStyle.textSize === typeProperties.style.textSize)}</label>
+        {(hasLines(cue.type) || isBlockCue(cue.type)) && (
+          <label><span>Line width</span><span className="option-slider"><input type="range" min="0.5" max="8" step="0.5" value={cueStyle.lineWidth} onChange={(e) => updateStyle("lineWidth", roundLineWidth(e.target.value))} /><output>{formatLineWidth(cueStyle.lineWidth)}</output></span>{resetButton("line width", () => updateStyle("lineWidth", typeProperties.style.lineWidth), cueStyle.lineWidth === typeProperties.style.lineWidth)}</label>
+        )}
+      </fieldset>
+    );
+  };
+
+  const renderMultiCueProperties = (selectedCues) => {
+    const properties = selectedCues.map(getCueProperties);
+    const allSame = (getter) => selectedCues.every((cue, index) => index === 0 || Object.is(getter(cue, properties[index]), getter(selectedCues[0], properties[0])));
+    const applyOverride = (section, key, value) => {
+      const selectedIds = new Set(selectedCues.map((cue) => cue.id));
+      setCues((current) => current.map((cue) => {
+        if (!selectedIds.has(cue.id)) return cue;
+        const defaults = getTypeProperties(cue.type);
+        const defaultValue = section ? defaults[section][key] : defaults[key];
+        const customProperties = compactCueProperties(cue.type, cue.customProperties);
+        if (section) {
+          const sectionOverrides = { ...(customProperties[section] || {}) };
+          if (Object.is(value, defaultValue)) delete sectionOverrides[key];
+          else sectionOverrides[key] = value;
+          if (Object.keys(sectionOverrides).length) customProperties[section] = sectionOverrides;
+          else delete customProperties[section];
+        } else if (Object.is(value, defaultValue)) delete customProperties[key];
+        else customProperties[key] = value;
+        const hasOverrides = Object.keys(customProperties).length > 0;
+        return {
+          ...cue,
+          customPropertiesEnabled: hasOverrides,
+          customProperties: hasOverrides ? customProperties : undefined,
+        };
+      }));
+      markDirty();
+    };
+    const allMarginCues = selectedCues.every((cue) => isMarginCue(cue.type));
+    const allLineCues = selectedCues.every((cue) => hasLines(cue.type) || isBlockCue(cue.type));
+    const allPointCues = selectedCues.every((cue) => isPointCue(cue.type));
+    const allBlockCues = selectedCues.every((cue) => isBlockCue(cue.type));
+    const colorMixed = !allSame((_cue, cueProperties) => cueProperties.color);
+    const textSizeMixed = !allSame((_cue, cueProperties) => cueProperties.style.textSize);
+    const lineWidthMixed = allLineCues && !allSame((_cue, cueProperties) => cueProperties.style.lineWidth);
+    const marginMixed = allMarginCues && !allSame((_cue, cueProperties) => cueProperties.margin);
+
+    return (
+      <fieldset className="inspector-properties multi-cue-properties">
+        <label><span>Colour{colorMixed ? " (Mixed)" : ""}</span><PaletteColorInput value={properties[0].color} onCommit={(value) => applyOverride(null, "color", value)} /><span /></label>
+        <label><span>Text size{textSizeMixed ? " (Mixed)" : ""}</span><span className="option-slider"><input type="range" min="6" max="28" step="1" value={properties[0].style.textSize} onChange={(event) => applyOverride("style", "textSize", parseFloat(event.target.value))} />{properties[0].style.textSize}</span><span /></label>
+        {allMarginCues && <label><span>Margin{marginMixed ? " (Mixed)" : ""}</span><span className="option-slider"><input type="range" min="0" max="600" value={properties[0].margin} onChange={(event) => applyOverride(null, "margin", parseInt(event.target.value, 10))} />{Math.round(properties[0].margin)}</span><span /></label>}
+        {allPointCues && <>
+          <label><span>View Cue Line{!allSame((_cue, cueProperties) => cueProperties.style.viewCueLine !== false) ? " (Mixed)" : ""}</span><input type="checkbox" checked={properties[0].style.viewCueLine !== false} onChange={(event) => applyOverride("style", "viewCueLine", event.target.checked)} /><span /></label>
+          <label><span>View Cue Point{!allSame((_cue, cueProperties) => cueProperties.style.viewCuePoint !== false) ? " (Mixed)" : ""}</span><input type="checkbox" checked={properties[0].style.viewCuePoint !== false} onChange={(event) => applyOverride("style", "viewCuePoint", event.target.checked)} /><span /></label>
+          <label><span>Text position{!allSame((_cue, cueProperties) => cueProperties.style.textPosition || "above") ? " (Mixed)" : ""}</span><select value={properties[0].style.textPosition || "above"} onChange={(event) => applyOverride("style", "textPosition", event.target.value)}><option value="above">Above cue line</option><option value="below">Below cue line</option></select><span /></label>
+          <label><span>Cue line position{!allSame((_cue, cueProperties) => cueProperties.style.cueLinePosition || "below") ? " (Mixed)" : ""}</span><select value={properties[0].style.cueLinePosition || "below"} onChange={(event) => applyOverride("style", "cueLinePosition", event.target.value)}><option value="above">Above marker</option><option value="below">Below marker</option></select><span /></label>
+          <label><span>Cue position{!allSame((_cue, cueProperties) => cueProperties.style.cueSide || "after") ? " (Mixed)" : ""}</span><select value={properties[0].style.cueSide || "after"} onChange={(event) => applyOverride("style", "cueSide", event.target.value)}><option value="before">Before guide</option><option value="after">After guide</option></select><span /></label>
+          <label><span>Marker height{!allSame((_cue, cueProperties) => cueProperties.style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT) ? " (Mixed)" : ""}</span><span className="option-slider"><input type="range" min="4" max="100" step="2" value={properties[0].style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT} onChange={(event) => applyOverride("style", "markerHeight", parseFloat(event.target.value))} />{properties[0].style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT}</span><span /></label>
+        </>}
+        {allBlockCues && <>
+          <label><span>Fill colour{!allSame((_cue, cueProperties) => cueProperties.blockAppearance.fillColor) ? " (Mixed)" : ""}</span><PaletteColorInput value={properties[0].blockAppearance.fillColor} onCommit={(value) => applyOverride("blockAppearance", "fillColor", value)} /><span /></label>
+          <label><span>Fill enabled{!allSame((_cue, cueProperties) => cueProperties.blockAppearance.fillEnabled) ? " (Mixed)" : ""}</span><input type="checkbox" checked={properties[0].blockAppearance.fillEnabled} onChange={(event) => applyOverride("blockAppearance", "fillEnabled", event.target.checked)} /><span /></label>
+        </>}
+        {allLineCues && <label><span>Line width{lineWidthMixed ? " (Mixed)" : ""}</span><span className="option-slider"><input type="range" min="0.5" max="8" step="0.5" value={properties[0].style.lineWidth} onChange={(event) => applyOverride("style", "lineWidth", roundLineWidth(event.target.value))} /><output>{formatLineWidth(properties[0].style.lineWidth)}</output></span><span /></label>}
+      </fieldset>
+    );
+  };
 
   const beginEditingDocumentName = () => {
     setDocumentNameDraft(documentName);
@@ -1568,7 +2023,7 @@ export default function App() {
     const cueCoordinates = [cue.x, cue.x2, cue.left, cue.right]
       .filter((value) => typeof value === "number");
     if (cueCoordinates.some((x) => isOnCallingPage(x, width))) return true;
-    return isMarginCue(cue.type) && isOnCallingPage(margins[cue.type], width);
+    return isMarginCue(cue.type) && isOnCallingPage(getCueProperties(cue).margin, width);
   });
   const callingPageHasContent = callingPageHasCues;
 
@@ -1680,7 +2135,13 @@ export default function App() {
           shifted[key] += delta;
         }
       }
-      if (shifted.type === "BLOCK" && shifted.left > shifted.right) {
+      if (typeof shifted.customProperties?.margin === "number" && isOnCallingPage(shifted.customProperties.margin, width)) {
+        shifted.customProperties = {
+          ...shifted.customProperties,
+          margin: shifted.customProperties.margin + delta,
+        };
+      }
+      if (isBlockCue(shifted.type) && shifted.left > shifted.right) {
         [shifted.left, shifted.right] = [shifted.right, shifted.left];
         shifted.x = shifted.left;
       }
@@ -1709,11 +2170,12 @@ export default function App() {
       return;
     }
     if (!enabled) {
-      setMargins({
+      setMargins((current) => ({
+        ...current,
         SFX: 150,
         TM: 100,
         DCA: 50,
-      });
+      }));
     }
     setNotesPageSide(enabled ? callingPageSide : "off");
     setSelectedCueId(null);
@@ -1722,9 +2184,133 @@ export default function App() {
     markDirty();
   };
 
+  const addCustomCueType = () => {
+    const name = customCueTypeName.trim();
+    if (!name) return;
+    const id = `CUSTOM_${customCueTypeKind}_${createId()}`;
+    const baseType = customCueTypeKind === "POINT" ? "SFX" : customCueTypeKind === "BLOCK" ? "BLOCK" : "NOTE";
+    const definition = {
+      id,
+      name,
+      kind: customCueTypeKind,
+      icon: customCueTypeIcon,
+      prefix: customCueTypePrefix,
+      suffix: customCueTypeSuffix,
+      ...(customCueTypeKind === "BLOCK" ? { blockAppearance: { ...blockAppearance } } : {}),
+    };
+    setCustomCueTypes((current) => [...current, definition]);
+    setColors((current) => ({ ...current, [id]: current[baseType] }));
+    setStyles((current) => ({ ...current, [id]: { ...current[baseType] } }));
+    if (customCueTypeKind === "POINT") setMargins((current) => ({ ...current, [id]: current.SFX }));
+    setHiddenCueTypes((current) => ({ ...current, [id]: false }));
+    setCueTypeFilters((current) => ({ ...current, [id]: true }));
+    setCustomCueTypeName("");
+    setCustomCueTypeIcon(getDefaultCustomCueIcon(customCueTypeKind));
+    setCustomCueTypePrefix("");
+    setCustomCueTypeSuffix("");
+    markDirty();
+  };
+
+  const removeCustomCueType = (definition) => {
+    const cueCount = cues.filter((cue) => cue.type === definition.id).length;
+    const cueMessage = cueCount === 1 ? "1 cue" : `${cueCount} cues`;
+    if (!window.confirm(`Remove the custom cue type “${definition.name}”? ${cueMessage} of this type will be permanently deleted.`)) return;
+    const withoutType = (current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== definition.id));
+    setCues((current) => current.filter((cue) => cue.type !== definition.id));
+    setCustomCueTypes((current) => current.filter((item) => item.id !== definition.id));
+    setColors(withoutType);
+    setStyles(withoutType);
+    setMargins(withoutType);
+    setHiddenCueTypes(withoutType);
+    setCueTypeFilters(withoutType);
+    if (mode === definition.id) setMode("POINTER");
+    if (expandedCueType === definition.id) setExpandedCueType(null);
+    if (selectedCue?.type === definition.id) setSelectedCueId(null);
+    markDirty();
+  };
+
+  const convertCueType = () => {
+    if (!convertFromType || !convertToType || convertFromType === convertToType) return;
+    const affected = cues.filter((cue) => cue.type === convertFromType);
+    if (!affected.length) return;
+    if (!window.confirm(`Convert ${affected.length} ${getDisplayCueTypeName(convertFromType)} cue${affected.length === 1 ? "" : "s"} to ${getDisplayCueTypeName(convertToType)}? Per-cue custom properties will be cleared.`)) return;
+    pushUndo(cues);
+    setCues((current) => current.map((cue) => {
+      if (cue.type !== convertFromType) return cue;
+      const next = { ...cue, type: convertToType, customPropertiesEnabled: false, customProperties: undefined };
+      const anchorX = cue.left ?? cue.x ?? 0;
+      const anchorY = cue.top ?? cue.y ?? 0;
+      if (isBlockCue(convertToType)) {
+        next.left = anchorX;
+        next.top = anchorY;
+        next.right = cue.right ?? anchorX + 120;
+        next.bottom = cue.bottom ?? anchorY + 60;
+        next.x = next.left;
+        next.y = next.top;
+        delete next.x2;
+        delete next.y2;
+      } else {
+        next.x = anchorX;
+        next.y = anchorY;
+        delete next.left;
+        delete next.top;
+        delete next.right;
+        delete next.bottom;
+        if (convertToType === "FADE") {
+          next.x2 = cue.x2 ?? anchorX + 100;
+          next.y2 = cue.y2 ?? anchorY;
+        } else {
+          delete next.x2;
+          delete next.y2;
+        }
+      }
+      return next;
+    }));
+    setSelectedCueId(null);
+    markDirty();
+  };
+
+  const findReplaceMatches = findReplaceType && findText
+    ? cues.filter((cue) => cue.type === findReplaceType && cue.label.includes(findText))
+    : [];
+
+  const replaceCueText = () => {
+    if (!findReplaceType || !findText || !findReplaceMatches.length) return;
+    const action = replaceText
+      ? `replace “${findText}” with “${replaceText}”`
+      : `remove “${findText}”`;
+    if (!window.confirm(`This will ${action} in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}. This can change a large amount of data. The safest option is to download a saved copy of the showfile before proceeding. Continue?`)) return;
+    pushUndo(cues);
+    setCues((current) => current.map((cue) => cue.type === findReplaceType && cue.label.includes(findText)
+      ? { ...cue, label: cue.label.split(findText).join(replaceText) }
+      : cue));
+    markDirty();
+  };
+
+  const openToolsView = (view) => {
+    if (view === "convert") {
+      setConvertFromType("");
+      setConvertToType("");
+    } else if (view === "find-replace") {
+      setFindReplaceType("");
+      setFindText("");
+      setReplaceText("");
+    } else if (view === "manage") {
+      setCustomCueTypeName("");
+      setCustomCueTypeKind("POINT");
+      setCustomCueTypeIcon(getDefaultCustomCueIcon("POINT"));
+      setCustomCueTypePrefix("");
+      setCustomCueTypeSuffix("");
+    }
+    setActiveToolsView(view);
+  };
+
+  const selectedCues = cues.filter((cue) => selectedCueIds.includes(cue.id));
+  const selectedCue = selectedCues.length === 1 ? selectedCues[0] : null;
+
   return (
     <div className="app-shell">
-      <main className="editor-main">
+      <main ref={editorMainRef} className="editor-main">
         <div className="app-toolbar">
           <div className="topbar-identity">
             <strong>SCRIPT MARKUP APP</strong>
@@ -1756,17 +2342,36 @@ export default function App() {
           <button onClick={redoLastCueAction} disabled={redoStack.length === 0}><ToolbarIcon name="redo" />Redo</button>
           <button
             className={`toolbar-options ${showOptionsDrawer ? "is-active" : ""}`}
-            onClick={() => setShowOptionsDrawer((open) => !open)}
+            onClick={() => setShowOptionsDrawer((open) => {
+              const nextOpen = !open;
+              if (nextOpen) {
+                setShowInspector(false);
+                setShowGeneralOptions(false);
+                setExpandedCueType(null);
+              }
+              return nextOpen;
+            })}
             aria-expanded={showOptionsDrawer}
           >
             <ToolbarIcon name="options" />Options
           </button>
+          <button className="toolbar-tools" onClick={() => { setActiveToolsView(null); setShowTools(true); }}><ToolbarIcon name="tools" />Tools</button>
           <button className="toolbar-help" onClick={() => setShowHelp(true)} aria-label="Help" title="Help"><ToolbarIcon name="help" /></button>
         </div>
 
         <nav ref={toolToolbarRef} className="tool-toolbar" aria-label="Cue tools">
           <div className="tool-toolbar-group cue-tool-group">
-            {TOOL_BUTTONS.map((tool) => (
+            <button
+              className={showCueList ? "is-active" : ""}
+              onClick={() => setShowCueList((visible) => !visible)}
+              aria-pressed={showCueList}
+              title={showCueList ? "Hide cue list" : "Show cue list"}
+            >
+              <MaterialIcon path={mdiEye} />
+              <span>View Cues</span>
+            </button>
+            <span className="cue-toolbar-divider" aria-hidden="true" />
+            {cueToolButtons.filter((tool) => tool.type === "POINTER" || !hiddenCueTypes[tool.type]).map((tool) => (
               <button
                 key={tool.type}
                 className={mode === tool.type ? "is-active" : ""}
@@ -1808,7 +2413,7 @@ export default function App() {
               <input
                 type="range"
                 min="0.5"
-                max="1.5"
+                max="2"
                 step="0.05"
                 value={displayScale}
                 onChange={(e) => setDisplayScale(parseFloat(e.target.value))}
@@ -1816,40 +2421,116 @@ export default function App() {
               <output>{Math.round(displayScale * 100)}%</output>
             </label>
             <button
-              className={showCueList ? "is-active" : ""}
-              onClick={() => setShowCueList((visible) => !visible)}
-              aria-pressed={showCueList}
-              title={showCueList ? "Hide cue list" : "Show cue list"}
+              className={showInspector ? "is-active" : ""}
+              onClick={() => setShowInspector((open) => {
+                const nextOpen = !open;
+                if (nextOpen) setShowOptionsDrawer(false);
+                return nextOpen;
+              })}
+              aria-expanded={showInspector}
+              title={showInspector ? "Hide inspector" : "Show inspector"}
             >
-              <MaterialIcon path={mdiEye} />
-              <span>Cue List</span>
+              <MaterialIcon path={mdiPencil} />
+              <span>Inspector</span>
             </button>
           </div>
         </nav>
 
-        <div className={`options-drawer ${showOptionsDrawer ? "is-open" : ""}`}>
+        <div className={`options-drawer ${showOptionsDrawer || showInspector ? "is-open" : ""}`}>
+          {showInspector ? (
+            <>
+              <div className="inspector-header">
+                <h3>Cue Inspector</h3>
+                <button type="button" onClick={() => setShowInspector(false)} aria-label="Close inspector">X</button>
+              </div>
+              {selectedCues.length > 1 && (
+                <div className="inspector-content">
+                  <div className="multi-cue-heading">{selectedCues.length} cues selected</div>
+                  {renderMultiCueProperties(selectedCues)}
+                </div>
+              )}
+              {selectedCue && (
+                <div className="inspector-content">
+                  <label className="inspector-name-field">
+                    <span>Cue name</span>
+                    <input
+                      type="text"
+                      value={selectedCue.label}
+                      onChange={(e) => {
+                        const label = e.target.value;
+                        setCues((current) => current.map((cue) => cue.id === selectedCue.id ? { ...cue, label } : cue));
+                        markDirty();
+                      }}
+                    />
+                  </label>
+                  <label className="custom-properties-toggle">
+                    <span>Custom cue properties</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedCue.customPropertiesEnabled)}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        setCues((current) => current.map((cue) => {
+                          if (cue.id !== selectedCue.id) return cue;
+                          return {
+                            ...cue,
+                            customPropertiesEnabled: enabled,
+                            customProperties: compactCueProperties(cue.type, cue.customProperties),
+                          };
+                        }));
+                        markDirty();
+                      }}
+                    />
+                  </label>
+                  {renderInspectorProperties(selectedCue)}
+                </div>
+              )}
+            </>
+          ) : (
+          <>
           <div className="drawer-header">
             <h2>Tool Options</h2>
             <button onClick={() => setShowOptionsDrawer(false)} aria-label="Close options">×</button>
           </div>
-          <section className="cue-option-section calling-page-section" style={{ "--cue-color": "#374151" }}>
+          <section className="cue-option-section general-options-section" style={{ "--cue-color": "#374151" }}>
             <button
-              className={`cue-option-trigger ${showCallingPageOptions ? "is-expanded" : ""}`}
+              className={`cue-option-trigger ${showGeneralOptions ? "is-expanded" : ""}`}
               onClick={() => {
-                const nextExpanded = !showCallingPageOptions;
-                setShowCallingPageOptions(nextExpanded);
-                setShowDecorationOptions(false);
+                const nextExpanded = !showGeneralOptions;
+                setShowGeneralOptions(nextExpanded);
                 setExpandedCueType(null);
               }}
-              aria-expanded={showCallingPageOptions}
+              aria-expanded={showGeneralOptions}
             >
-              <span className="cue-option-icon"><MaterialIcon path={mdiPageNextOutline} /></span>
-              <span className="cue-option-name"><strong>PROMPT/SHOWCALL PAGE</strong></span>
+              <span className="cue-option-icon"><MaterialIcon path={mdiTuneVertical} /></span>
+              <span className="cue-option-name"><strong>GENERAL</strong></span>
               <span className="cue-option-chevron">
-                <MaterialIcon path={showCallingPageOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
+                <MaterialIcon path={showGeneralOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
               </span>
             </button>
-            {showCallingPageOptions && <div className="calling-page-options">
+            {showGeneralOptions && <div className="general-options">
+            <div className="general-options-group cue-type-toggles">
+              <strong>Cue types</strong>
+              {cueToolButtons.filter((tool) => tool.type !== "POINTER").map((tool) => (
+                <label key={tool.type}>
+                  <span>{tool.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenCueTypes[tool.type]}
+                    onChange={(e) => {
+                      const hidden = !e.target.checked;
+                      setHiddenCueTypes((current) => ({ ...current, [tool.type]: hidden }));
+                      if (hidden && mode === tool.type) setMode("POINTER");
+                      if (hidden && expandedCueType === tool.type) setExpandedCueType(null);
+                      setSelectedCueId(null);
+                      markDirty();
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="general-options-group calling-page-options">
+            <strong>Prompt/Showcall page</strong>
             <label className={!pdfBytes || (notesPageSide !== "off" && callingPageHasContent) ? "is-disabled" : ""}>
               <span>Enable prompt/showcall page</span>
               <input
@@ -1873,26 +2554,9 @@ export default function App() {
             {callingPageHasContent && (
               <small>Move or remove prompt/showcall-page cues before disabling this page.</small>
             )}
-            </div>}
-          </section>
-          <section className="cue-option-section decoration-section" style={{ "--cue-color": "#111827" }}>
-            <button
-              className={`cue-option-trigger ${showDecorationOptions ? "is-expanded" : ""}`}
-              onClick={() => {
-                const nextExpanded = !showDecorationOptions;
-                setShowDecorationOptions(nextExpanded);
-                setShowCallingPageOptions(false);
-                setExpandedCueType(null);
-              }}
-              aria-expanded={showDecorationOptions}
-            >
-              <span className="cue-option-icon"><MaterialIcon path={mdiFormatPageSplit} /></span>
-              <span className="cue-option-name"><strong>DIVIDERS AND HEADERS</strong></span>
-              <span className="cue-option-chevron">
-                <MaterialIcon path={showDecorationOptions ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
-              </span>
-            </button>
-            {showDecorationOptions && <div className="decoration-options">
+            </div>
+            <div className="general-options-group decoration-options">
+              <strong>Dividers and headers</strong>
               <label>
                 <span>Lock dividers and headers</span>
                 <input
@@ -1915,12 +2579,12 @@ export default function App() {
                   <strong>Dividers</strong>
                   <button type="button" disabled={!pdfBytes} onClick={addDivider}>Add divider</button>
                 </div>
-                <label><span>Colour</span><input type="color" value={dividerAppearance.color} onChange={(e) => { setDividerAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label><span>Colour</span><PaletteColorInput value={dividerAppearance.color} onCommit={(value) => { setDividerAppearance((current) => ({ ...current, color: value })); markDirty(); }} /></label>
                 <label>
                   <span>Line width</span>
                   <span className="divider-width-control">
-                    <input type="range" min="0.5" max="8" step="0.5" value={dividerAppearance.lineWidth} onChange={(e) => { setDividerAppearance((current) => ({ ...current, lineWidth: parseFloat(e.target.value) })); markDirty(); }} />
-                    <output>{dividerAppearance.lineWidth}</output>
+                    <input type="range" min="0.5" max="8" step="0.5" value={dividerAppearance.lineWidth} onChange={(e) => { setDividerAppearance((current) => ({ ...current, lineWidth: roundLineWidth(e.target.value) })); markDirty(); }} />
+                    <output>{formatLineWidth(dividerAppearance.lineWidth)}</output>
                   </span>
                 </label>
                 {dividers.map((divider, index) => (
@@ -1936,7 +2600,7 @@ export default function App() {
                   <strong>Headers</strong>
                   <button type="button" disabled={!pdfBytes} onClick={addHeader}>Add header</button>
                 </div>
-                <label><span>Colour</span><input type="color" value={headerAppearance.color} onChange={(e) => { setHeaderAppearance((current) => ({ ...current, color: e.target.value })); markDirty(); }} /></label>
+                <label><span>Colour</span><PaletteColorInput value={headerAppearance.color} onCommit={(value) => { setHeaderAppearance((current) => ({ ...current, color: value })); markDirty(); }} /></label>
                 <label>
                   <span>Text size</span>
                   <span className="divider-width-control">
@@ -1958,10 +2622,11 @@ export default function App() {
               </div>
 
               <button type="button" className="reset-decorations-button" disabled={dividersLocked || (dividers.length === 0 && headers.length === 0)} onClick={resetDividersAndHeaders}>Reset dividers and headers</button>
+            </div>
             </div>}
           </section>
           <div className="cue-options-accordion">
-            {TOOL_BUTTONS.filter((tool) => tool.type !== "POINTER").map(({ type, icon }) => {
+            {cueToolButtons.filter((tool) => tool.type !== "POINTER" && !hiddenCueTypes[tool.type]).map(({ type, icon }) => {
               const isExpanded = expandedCueType === type;
               return (
                 <section className="cue-option-section" key={type} style={{ "--cue-color": colors[type] }}>
@@ -1969,14 +2634,13 @@ export default function App() {
                     className={`cue-option-trigger ${isExpanded ? "is-expanded" : ""}`}
                     onClick={() => {
                       setExpandedCueType(isExpanded ? null : type);
-                      setShowCallingPageOptions(false);
-                      setShowDecorationOptions(false);
+                      setShowGeneralOptions(false);
                     }}
                     aria-expanded={isExpanded}
                   >
                     <span className="cue-option-icon"><MaterialIcon path={icon} /></span>
                     <span className="cue-option-name">
-                      <strong>{getCueTypeOptionLabel(type)} CUES</strong>
+                      <strong>{getDisplayCueTypeLabel(type)} CUES</strong>
                       {hiddenCueTypes[type] && <span className="hidden-status">(Hidden)</span>}
                     </span>
                     <span className="cue-option-chevron">
@@ -2028,9 +2692,9 @@ export default function App() {
                 setMode(e.target.value);
               }}
             >
-              {ALL_CUE_TYPES.map((type) => (
+              {availableCueTypes.map((type) => (
                 <option key={type} value={type}>
-                  {getCueTypeOptionLabel(type)}
+                  {getDisplayCueTypeLabel(type)}
                 </option>
               ))}
             </select>
@@ -2043,7 +2707,7 @@ export default function App() {
           </span>
 
           <div className="cue-settings" style={{ "--cue-color": colors[mode] }}>
-            <strong>{getCueTypeName(mode)} Settings</strong>
+            <strong>{getDisplayCueTypeName(mode)} Settings</strong>
 
             {mode === "FADE" && (
               <span style={{ fontSize: 12 }}>
@@ -2051,13 +2715,13 @@ export default function App() {
               </span>
             )}
 
-            {mode === "BLOCK" && (
+            {isBlockCue(mode) && (
               <span style={{ fontSize: 12 }}>
                 {blockStart ? "Click the opposite corner" : "Click the first corner"}
               </span>
             )}
 
-            {mode !== "BLOCK" && <label>
+            {!isBlockCue(mode) && <label>
               Colour{" "}
               <input
                 type="color"
@@ -2066,7 +2730,7 @@ export default function App() {
               />
             </label>}
 
-            {mode === "BLOCK" && (
+            {isBlockCue(mode) && (
               <>
                 <label>
                   Line{" "}
@@ -2170,7 +2834,7 @@ export default function App() {
               </span>
             </label>
 
-            {(hasLines(mode) || mode === "BLOCK") && (
+            {(hasLines(mode) || isBlockCue(mode)) && (
               <label>
                 Line Width{" "}
                 <input
@@ -2180,16 +2844,95 @@ export default function App() {
                   step="0.5"
                   value={styles[mode].lineWidth}
                   onChange={(e) =>
-                    updateSelectedStyle("lineWidth", parseFloat(e.target.value))
+                    updateSelectedStyle("lineWidth", roundLineWidth(e.target.value))
                   }
                 />
                 <span style={{ minWidth: 24, display: "inline-block" }}>
-                  {styles[mode].lineWidth}
+                  {formatLineWidth(styles[mode].lineWidth)}
                 </span>
               </label>
             )}
           </div>
+          </>
+          )}
         </div>
+
+        {showTools && (
+          <div className="modal-backdrop" onMouseDown={() => { setShowTools(false); setActiveToolsView(null); }}>
+            <section className="app-modal save-load-modal tools-modal" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="save-load-heading">
+                <div>
+                  <span className="modal-eyebrow">TOOLS</span>
+                  <h2>{activeToolsView === "convert" ? "Convert Cue Types" : activeToolsView === "manage" ? "Manage Cue Types" : activeToolsView === "find-replace" ? "Find & Replace" : "Tools"}</h2>
+                  <p>{activeToolsView === "convert" ? "Convert every cue of one type into another type." : activeToolsView === "manage" ? "Create, rename, style, or remove custom cue types." : activeToolsView === "find-replace" ? "Replace exact text within one cue type." : "Choose a tool to work with this showfile."}</p>
+                </div>
+                <button className="modal-close" onClick={() => { setShowTools(false); setActiveToolsView(null); }} aria-label="Close">×</button>
+              </div>
+              {activeToolsView === null && (
+                <div className="tools-launcher">
+                  <button type="button" onClick={() => openToolsView("convert")}><ToolbarIcon name="tools" /><span><strong>Convert Cue Types</strong><small>Change all cues of one type into another</small></span></button>
+                  <button type="button" onClick={() => openToolsView("manage")}><MaterialIcon path={mdiCogOutline} /><span><strong>Manage Cue Types</strong><small>Add, rename, choose icons, or remove custom types</small></span></button>
+                  <button type="button" onClick={() => openToolsView("find-replace")}><MaterialIcon path={mdiFindReplace} /><span><strong>Find &amp; Replace</strong><small>Replace exact text within one cue type</small></span></button>
+                </div>
+              )}
+              {activeToolsView === "convert" && (
+                <div className="tools-modal-content cue-type-converter">
+                  <button type="button" className="tools-back" onClick={() => setActiveToolsView(null)}>← All tools</button>
+                  <label><span>From</span><select value={convertFromType} onChange={(event) => setConvertFromType(event.target.value)}><option value="">Select type</option>{availableCueTypes.map((type) => <option key={type} value={type}>{getDisplayCueTypeLabel(type)}</option>)}</select></label>
+                  <label><span>To</span><select value={convertToType} onChange={(event) => setConvertToType(event.target.value)}><option value="">Select type</option>{availableCueTypes.map((type) => <option key={type} value={type}>{getDisplayCueTypeLabel(type)}</option>)}</select></label>
+                  <button type="button" disabled={!convertFromType || !convertToType || convertFromType === convertToType || !cues.some((cue) => cue.type === convertFromType)} onClick={convertCueType}>
+                    Convert {convertFromType ? cues.filter((cue) => cue.type === convertFromType).length : 0} cues
+                  </button>
+                </div>
+              )}
+              {activeToolsView === "find-replace" && (
+                <div className="tools-modal-content find-replace-tool">
+                  <button type="button" className="tools-back" onClick={() => setActiveToolsView(null)}>← All tools</button>
+                  <label><span>Cue type</span><select value={findReplaceType} onChange={(event) => setFindReplaceType(event.target.value)}><option value="">Select type</option>{availableCueTypes.map((type) => <option key={type} value={type}>{getDisplayCueTypeLabel(type)}</option>)}</select></label>
+                  <label><span>Find</span><input type="text" value={findText} onChange={(event) => setFindText(event.target.value)} placeholder="Exact text, including spaces and punctuation" /></label>
+                  <label><span>Replace</span><input type="text" value={replaceText} onChange={(event) => setReplaceText(event.target.value)} placeholder="Leave blank to remove the found text" /></label>
+                  <p className="literal-match-note">Matching is case-sensitive and literal. Spaces and punctuation are included exactly as entered.</p>
+                  <button type="button" disabled={!findReplaceType || !findText || !findReplaceMatches.length} onClick={replaceCueText}>
+                    {replaceText
+                      ? `Replace “${findText}” with “${replaceText}” in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}`
+                      : `Remove “${findText}” from ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}`}
+                  </button>
+                </div>
+              )}
+              {activeToolsView === "manage" && (
+                <div className="tools-modal-content manage-cue-types">
+                  <button type="button" className="tools-back" onClick={() => setActiveToolsView(null)}>← All tools</button>
+                  <div className="custom-cue-type-builder">
+                    <strong>Add custom cue type</strong>
+                    <input type="text" placeholder="Cue type name" value={customCueTypeName} onChange={(event) => setCustomCueTypeName(event.target.value)} />
+                    <select value={customCueTypeKind} onChange={(event) => { const kind = event.target.value; setCustomCueTypeKind(kind); setCustomCueTypeIcon(getDefaultCustomCueIcon(kind)); }}>
+                      <option value="POINT">Cue Point Type</option><option value="NOTE">Note Type</option><option value="BLOCK">Block Type</option>
+                    </select>
+                    <div className="custom-cue-affixes">
+                      <label><span>Text prefix</span><input type="text" placeholder="Optional" value={customCueTypePrefix} onChange={(event) => setCustomCueTypePrefix(event.target.value)} /></label>
+                      <label><span>Text suffix</span><input type="text" placeholder="Optional" value={customCueTypeSuffix} onChange={(event) => setCustomCueTypeSuffix(event.target.value)} /></label>
+                    </div>
+                    <span className="icon-picker-label">Toolbar icon</span>
+                    <div className="custom-icon-picker">
+                      {CUSTOM_CUE_ICONS.map(([id, label, path]) => <button key={id} type="button" className={customCueTypeIcon === id ? "is-selected" : ""} title={label} aria-label={label} aria-pressed={customCueTypeIcon === id} onClick={() => setCustomCueTypeIcon(id)}><MaterialIcon path={path} /></button>)}
+                    </div>
+                    <button type="button" disabled={!customCueTypeName.trim()} onClick={addCustomCueType}>Add cue type</button>
+                  </div>
+                  {customCueTypes.length > 0 && <div className="custom-cue-type-list">
+                    <strong>Custom cue types</strong>
+                    {customCueTypes.map((definition) => <div className="custom-cue-type-row" key={definition.id}>
+                      <MaterialIcon path={CUSTOM_CUE_ICON_PATHS[definition.icon] || CUSTOM_CUE_ICON_PATHS[getDefaultCustomCueIcon(definition.kind)]} />
+                      <span>{definition.kind === "POINT" ? "Cue Point" : definition.kind === "BLOCK" ? "Block" : "Note"}</span>
+                      <input type="text" value={definition.name} onChange={(event) => { const name = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === definition.id ? { ...item, name } : item)); markDirty(); }} />
+                      <select aria-label={`${definition.name} icon`} value={definition.icon || getDefaultCustomCueIcon(definition.kind)} onChange={(event) => { const icon = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === definition.id ? { ...item, icon } : item)); markDirty(); }}>{CUSTOM_CUE_ICONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select>
+                      <button type="button" className="remove-custom-cue-type" onClick={() => removeCustomCueType(definition)}>Remove</button>
+                    </div>)}
+                  </div>}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
 
         {showFileMenu && (
           <div className="modal-backdrop" onMouseDown={() => setShowFileMenu(false)}>
@@ -2407,6 +3150,7 @@ export default function App() {
             />
 
             <svg
+              data-cue-page-index={pageIndex}
               data-coordinate-offset={documentOffset}
               width={combinedWidth}
               height={p.height}
@@ -2594,13 +3338,11 @@ export default function App() {
               {cues
                 .filter((c) => c.page === pageIndex && !hiddenCueTypes[c.type])
                 .map((cue) => {
-                  const color = colors[cue.type];
-                  const cueStyle = styles[cue.type] || {
-                    textSize: 10,
-                    lineWidth: 1.5,
-                  };
+                  const cueProperties = getCueProperties(cue);
+                  const color = cueProperties.color;
+                  const cueStyle = cueProperties.style;
 
-                  if (cue.type === "BLOCK") {
+                  if (isBlockCue(cue.type)) {
                     const width = cue.right - cue.left;
                     const height = cue.bottom - cue.top;
                     const corners = [
@@ -2620,12 +3362,12 @@ export default function App() {
                           y={cue.top}
                           width={width}
                           height={height}
-                          fill={blockAppearance.fillEnabled ? blockAppearance.fillColor : "none"}
-                          fillOpacity={blockAppearance.fillOpacity}
-                          stroke={blockAppearance.lineEnabled ? color : "none"}
+                          fill={cueProperties.blockAppearance.fillEnabled ? cueProperties.blockAppearance.fillColor : "none"}
+                          fillOpacity={cueProperties.blockAppearance.fillOpacity}
+                          stroke={cueProperties.blockAppearance.lineEnabled ? color : "none"}
                           strokeWidth={cueStyle.lineWidth}
                         />
-                        {selectedCueId === cue.id && (
+                        {selectedCueIds.includes(cue.id) && (
                           <rect
                             x={cue.left - 2}
                             y={cue.top - 2}
@@ -2666,7 +3408,7 @@ export default function App() {
                             updateCue(cue.id);
                           }}
                         >
-                          {cue.label}
+                          {getCueDisplayText(cue)}
                         </text>
                         {corners.map(([corner, x, y]) => (
                           <circle
@@ -2698,10 +3440,11 @@ export default function App() {
                           y1={cue.y}
                           x2={cue.x2}
                           y2={cue.y2}
-                          stroke={selectedCueId === cue.id ? "yellow" : color}
-                          strokeWidth={selectedCueId === cue.id ? cueStyle.lineWidth + 4 : cueStyle.lineWidth}
+                          stroke={selectedCueIds.includes(cue.id) ? "yellow" : color}
+                          strokeWidth={selectedCueIds.includes(cue.id) ? cueStyle.lineWidth + 4 : cueStyle.lineWidth}
+                          strokeLinecap="square"
                         />
-                        {selectedCueId === cue.id && (
+                        {selectedCueIds.includes(cue.id) && (
                           <line
                             x1={cue.x}
                             y1={cue.y}
@@ -2709,6 +3452,7 @@ export default function App() {
                             y2={cue.y2}
                             stroke={color}
                             strokeWidth={cueStyle.lineWidth}
+                            strokeLinecap="square"
                           />
                         )}
                         <line
@@ -2739,9 +3483,9 @@ export default function App() {
                             updateCue(cue.id);
                           }}
                         >
-                          {cue.label}
+                          {getCueDisplayText(cue)}
                         </text>
-                        {selectedCueId === cue.id && (
+                        {selectedCueIds.includes(cue.id) && (
                           <>
                             <circle
                               cx={cue.x}
@@ -2781,8 +3525,8 @@ export default function App() {
                         fill={color}
                         fontWeight="bold"
                         fontSize={cueStyle.textSize}
-                        stroke={selectedCueId === cue.id ? "yellow" : "none"}
-                        strokeWidth={selectedCueId === cue.id ? 3 : 0}
+                        stroke={selectedCueIds.includes(cue.id) ? "yellow" : "none"}
+                        strokeWidth={selectedCueIds.includes(cue.id) ? 3 : 0}
                         style={{ cursor: "grab", userSelect: "none" }}
                         onClick={(e) => selectCueFromClick(e, cue.id)}
                         onMouseDown={(e) => startDragFreeCue(e, cue.id)}
@@ -2791,12 +3535,13 @@ export default function App() {
                           updateCue(cue.id);
                         }}
                       >
-                        {cue.label}
+                        {getCueDisplayText(cue)}
                       </text>
                     );
                   }
 
-                  const marginX = margins[cue.type];
+                  const marginX = cueProperties.margin;
+                  const marginCueLayout = getMarginCueLayout(cue, marginX, cueStyle);
 
                   return (
                     <g
@@ -2810,18 +3555,21 @@ export default function App() {
                         <>
                           <line
                             x1={cue.x}
-                            y1={cue.y - 10}
+                            y1={cue.y - marginCueLayout.markerHalfHeight}
                             x2={cue.x}
-                            y2={cue.y + 10}
+                            y2={cue.y + marginCueLayout.markerHalfHeight}
                             stroke={color}
                             strokeWidth={cueStyle.lineWidth}
+                            strokeLinecap="square"
+                            opacity={cueStyle.viewCueLine !== false && cueStyle.viewCuePoint !== false ? 1 : 0.5}
+                            strokeDasharray={cueStyle.viewCueLine !== false && cueStyle.viewCuePoint !== false ? undefined : "5 5"}
                           />
 
                           <line
                             x1={cue.x}
-                            y1={cue.y - 10}
+                            y1={cue.y - marginCueLayout.markerHalfHeight}
                             x2={cue.x}
-                            y2={cue.y + 10}
+                            y2={cue.y + marginCueLayout.markerHalfHeight}
                             stroke="transparent"
                             strokeWidth={12}
                             style={{ cursor: "move" }}
@@ -2830,19 +3578,22 @@ export default function App() {
 
                           <line
                             x1={cue.x}
-                            y1={cue.y + 10}
+                            y1={marginCueLayout.lineY}
                             x2={marginX}
-                            y2={cue.y + 10}
+                            y2={marginCueLayout.lineY}
                             stroke={color}
                             strokeWidth={cueStyle.lineWidth}
+                            strokeLinecap="square"
+                            opacity={cueStyle.viewCueLine !== false ? 1 : 0.5}
+                            strokeDasharray={cueStyle.viewCueLine !== false ? undefined : "5 5"}
                           />
                         </>
                       )}
 
-                      {selectedCueId === cue.id && (
+                      {selectedCueIds.includes(cue.id) && (
                         <rect
-                          x={marginX}
-                          y={cue.y - cueStyle.textSize}
+                          x={marginCueLayout.textAnchor === "end" ? marginX - 85 : marginX}
+                          y={marginCueLayout.textY - cueStyle.textSize}
                           width={80}
                           height={cueStyle.textSize + 8}
                           fill="yellow"
@@ -2851,24 +3602,25 @@ export default function App() {
                       )}
 
                       <text
-                        x={marginX + 5}
-                        y={cue.y + 5}
+                        x={marginCueLayout.textX}
+                        y={marginCueLayout.textY}
+                        textAnchor={marginCueLayout.textAnchor}
                         fill={color}
                         fontWeight="bold"
                         fontSize={cueStyle.textSize}
                         style={{
-                          cursor: cue.type === "DCA" ? "ns-resize" : "text",
+                          cursor: cue.type === "DCA" ? "ns-resize" : "move",
                           userSelect: "none",
                         }}
                         onMouseDown={cue.type === "DCA"
                           ? (e) => startDragDcaCue(e, cue.id)
-                          : undefined}
+                          : (e) => startDragCueLine(e, cue.id)}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           updateCue(cue.id);
                         }}
                       >
-                        {cue.label}
+                        {getCueDisplayText(cue)}
                       </text>
                     </g>
                   );
@@ -2886,7 +3638,7 @@ export default function App() {
                 />
               )}
 
-              {mode === "BLOCK" && blockStart?.page === pageIndex && (
+              {isBlockCue(mode) && blockStart?.page === pageIndex && (
                 <circle
                   cx={blockStart.x}
                   cy={blockStart.y}
@@ -2987,7 +3739,7 @@ export default function App() {
           >
             <span>Filters</span>
             <span className="cue-filter-summary">
-              {Object.values(cueTypeFilters).filter(Boolean).length}/{ALL_CUE_TYPES.length}
+              {availableCueTypes.filter((type) => cueTypeFilters[type] !== false).length}/{availableCueTypes.length}
             </span>
             <span className="cue-filter-chevron">
               <MaterialIcon path={showCueFilters ? mdiMinusBoxOutline : mdiPlusBoxOutline} />
@@ -3006,7 +3758,7 @@ export default function App() {
               Cue Types
             </div>
 
-            {ALL_CUE_TYPES.map((type) => (
+            {availableCueTypes.map((type) => (
               <label
                 key={type}
                 style={{
@@ -3027,11 +3779,16 @@ export default function App() {
                     fontWeight: "bold",
                   }}
                 >
-                  {getCueTypeOptionLabel(type)}
+                  {getDisplayCueTypeLabel(type)}
                 </span>
                 {hiddenCueTypes[type] && <span className="hidden-status">(Hidden)</span>}
               </label>
             ))}
+
+            <label className="custom-cues-filter">
+              <input type="checkbox" checked={showCustomCuesOnly} onChange={(e) => setShowCustomCuesOnly(e.target.checked)} />{" "}
+              <span>Custom cues only</span>
+            </label>
 
             <div
               style={{
@@ -3070,29 +3827,29 @@ export default function App() {
           {filteredCues.map((cue) => (
             <div
               key={cue.id}
-              onClick={() => jumpToCue(cue)}
+              onClick={(event) => jumpToCue(cue, event)}
               onKeyDown={(e) => {
                 if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") jumpToCue(cue);
               }}
               role="button"
               tabIndex={0}
-              className={`cue-list-item${selectedCueId === cue.id ? " is-selected" : ""}${hiddenCueTypes[cue.type] ? " is-hidden" : ""}`}
+              className={`cue-list-item${selectedCueIds.includes(cue.id) ? " is-selected" : ""}${hiddenCueTypes[cue.type] ? " is-hidden" : ""}`}
               style={{
-                "--cue-color": colors[cue.type],
+                "--cue-color": getCueProperties(cue).color,
               }}
             >
               <strong
                 style={{
-                  color: colors[cue.type],
+                  color: getCueProperties(cue).color,
                 }}
               >
-                {getCueTypeAbbreviation(cue.type)}
+                {getDisplayCueTypeLabel(cue.type)}
               </strong>{" "}
               {editingCueId === cue.id ? (
                 <input
                   className="cue-name-editor"
-                  aria-label={`Rename ${getCueTypeName(cue.type)} cue`}
+                  aria-label={`Rename ${getDisplayCueTypeName(cue.type)} cue`}
                   value={cueNameDraft}
                   autoFocus
                   onClick={(e) => e.stopPropagation()}
@@ -3113,10 +3870,24 @@ export default function App() {
                   }}
                   title="Rename cue"
                 >
-                  <span>{cue.label}</span>
-                  <MaterialIcon path={mdiPencil} />
+                  <span>{getCueDisplayText(cue)}</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                className="cue-inspector-button"
+                aria-label={`Inspect ${cue.label}`}
+                title="Open cue inspector"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedCueId(cue.id);
+                  setShowOptionsDrawer(false);
+                  setShowInspector(true);
+                }}
+              >
+                <MaterialIcon path={mdiPencil} />
+              </button>
 
               <br />
 
@@ -3124,13 +3895,13 @@ export default function App() {
                 Page {cue.page + 1}{(() => {
                   const anchorX = cue.left ?? cue.x;
                   const width = pages[cue.page]?.width;
-                  const marginX = isMarginCue(cue.type) ? margins[cue.type] : null;
+                  const marginX = isMarginCue(cue.type) ? getCueProperties(cue).margin : null;
                   const hasCallingContent = width && (
                     anchorX < 0 || anchorX > width
                     || (typeof marginX === "number" && (marginX < 0 || marginX > width))
                   );
                   return hasCallingContent ? " · Prompt/Showcall" : "";
-                })()}
+                })()}{cue.customPropertiesEnabled ? " - Custom cue properties" : ""}
               </small>
             </div>
           ))}
