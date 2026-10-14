@@ -51,6 +51,7 @@ import {
   mdiVolumeHigh,
 } from "@mdi/js";
 import { usePdfRenderer } from "./hooks/usePdfRenderer";
+import packageMetadata from "../package.json";
 import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -65,6 +66,7 @@ import {
 } from "./lib/projectFiles";
 
 const MARGIN_CUE_TYPES = ["SFX", "TM", "DCA"];
+const APP_VERSION = packageMetadata.version;
 const FREE_CUE_TYPES = ["NOTE"];
 const LINE_CUE_TYPES = ["FADE"];
 const AREA_CUE_TYPES = ["BLOCK"];
@@ -450,6 +452,7 @@ export default function App() {
 
     return {
       app: "cue-pdf-annotator",
+      appVersion: APP_VERSION,
       version: 1,
       savedAt: new Date().toISOString(),
       pdfBase64: arrayBufferToBase64(pdfBytes),
@@ -677,6 +680,7 @@ export default function App() {
       try {
         const project = {
           app: "cue-pdf-annotator",
+          appVersion: APP_VERSION,
           version: 1,
           savedAt: new Date().toISOString(),
           pdfBase64: arrayBufferToBase64(latest.pdfBytes),
@@ -2314,7 +2318,7 @@ export default function App() {
         <div className="app-toolbar">
           <div className="topbar-identity">
             <strong>SCRIPT MARKUP APP</strong>
-            <small>PDF cue sheet annotator</small>
+            <small>PDF cue sheet annotator · v{APP_VERSION}</small>
           </div>
           <div className="document-name-area">
             {isEditingDocumentName ? (
