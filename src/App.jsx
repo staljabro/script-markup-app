@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import { LineCapStyle, PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import {
   mdiAlertCircleOutline,
@@ -51,7 +51,7 @@ import {
   mdiVolumeHigh,
 } from "@mdi/js";
 import { usePdfRenderer } from "./hooks/usePdfRenderer";
-import packageMetadata from "../package.json";
+import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "./version";
 import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -66,7 +66,6 @@ import {
 } from "./lib/projectFiles";
 
 const MARGIN_CUE_TYPES = ["SFX", "TM", "DCA"];
-const APP_VERSION = packageMetadata.version;
 const FREE_CUE_TYPES = ["NOTE"];
 const LINE_CUE_TYPES = ["FADE"];
 const AREA_CUE_TYPES = ["BLOCK"];
@@ -99,9 +98,9 @@ const DEFAULT_COLORS = {
 };
 const DEFAULT_STYLES = {
   POINTER: { textSize: 20, lineWidth: 1.5 },
-  SFX: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true },
-  TM: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true },
-  DCA: { textSize: 20, lineWidth: 1.5 }, FADE: { textSize: 20, lineWidth: 1.5 },
+  SFX: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true, prefix: "", suffix: "" },
+  TM: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true, prefix: "", suffix: "" },
+  DCA: { textSize: 20, lineWidth: 1.5, prefix: "", suffix: "" }, FADE: { textSize: 20, lineWidth: 1.5 },
   BLOCK: { textSize: 20, lineWidth: 1.5 }, NOTE: { textSize: 20, lineWidth: 1.5 },
 };
 const DEFAULT_BLOCK_APPEARANCE = { fillColor: "#ffffff", fillOpacity: 0.25, lineEnabled: true, fillEnabled: true };
@@ -243,6 +242,7 @@ export default function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [lastAutosave, setLastAutosave] = useState(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [showCueFilters, setShowCueFilters] = useState(false);
   const [selectedCueId, setSelectedCueIdState] = useState(null);
   const [selectedCueIds, setSelectedCueIds] = useState([]);
@@ -250,6 +250,7 @@ export default function App() {
   const [cueNameDraft, setCueNameDraft] = useState("");
   const [fadeStart, setFadeStart] = useState(null);
   const [blockStart, setBlockStart] = useState(null);
+  const [selectionBox, setSelectionBox] = useState(null);
 
   const [showCueList, setShowCueList] = useState(true);
   const [showInspector, setShowInspector] = useState(false);
@@ -283,6 +284,14 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [expandedCueType, setExpandedCueType] = useState(null);
   const [showGeneralOptions, setShowGeneralOptions] = useState(false);
+  const [optionsSearch, setOptionsSearch] = useState("");
+  const [lockedCueTypes, setLockedCueTypes] = useState({});
+  const [currentPage, setCurrentPage] = useState(0);
+  const [hasCopiedCueProperties, setHasCopiedCueProperties] = useState(false);
+  const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem("scriptMarkupDrawerWidth")) || 390);
+  const [cueListWidth, setCueListWidth] = useState(() => Number(localStorage.getItem("scriptMarkupCueListWidth")) || 300);
+  const [appDialog, setAppDialog] = useState(null);
+  const [toast, setToast] = useState(null);
 
   const [cueTypeFilters, setCueTypeFilters] = useState(() =>
     Object.fromEntries(
@@ -313,6 +322,27 @@ export default function App() {
   const loadProjectDataRef = useRef(null);
   const toolToolbarRef = useRef(null);
   const editorMainRef = useRef(null);
+  const copiedCuePropertiesRef = useRef(null);
+  const draggedCustomTypeIdRef = useRef(null);
+  const cueSelectionAnchorRef = useRef(null);
+  const dialogResolveRef = useRef(null);
+
+  const showToast = (message, tone = "info") => {
+    setToast({ message, tone });
+    window.setTimeout(() => setToast(null), 3500);
+  };
+
+  const requestAppDialog = (options) => new Promise((resolve) => {
+    dialogResolveRef.current = resolve;
+    setAppDialog({ value: "", confirmLabel: "Continue", ...options });
+  });
+
+  const closeAppDialog = (result) => {
+    const resolve = dialogResolveRef.current;
+    dialogResolveRef.current = null;
+    setAppDialog(null);
+    resolve?.(result);
+  };
 
   useEffect(() => {
     const toolbar = toolToolbarRef.current;
@@ -372,7 +402,8 @@ export default function App() {
   const getDisplayCueTypeLabel = (type) => getCustomCueDefinition(type)?.name || getCueTypeOptionLabel(type);
   const getCueDisplayText = (cue) => {
     const definition = getCustomCueDefinition(cue.type);
-    return `${definition?.prefix || ""}${cue.label}${definition?.suffix || ""}`;
+    const affixes = definition || styles[cue.type] || {};
+    return `${affixes.prefix || ""}${cue.label}${affixes.suffix || ""}`;
   };
 
   const getTypeProperties = (type) => ({
@@ -415,6 +446,7 @@ export default function App() {
   const setCuePropertyOverride = (cueId, section, key, value) => {
     setCues((current) => current.map((cue) => {
       if (cue.id !== cueId) return cue;
+      if (lockedCueTypes[cue.type]) return cue;
       const defaults = getTypeProperties(cue.type);
       const defaultValue = section ? defaults[section][key] : defaults[key];
       const customProperties = compactCueProperties(cue.type, cue.customProperties);
@@ -453,7 +485,7 @@ export default function App() {
     return {
       app: "cue-pdf-annotator",
       appVersion: APP_VERSION,
-      version: 1,
+      version: PROJECT_SCHEMA_VERSION,
       savedAt: new Date().toISOString(),
       pdfBase64: arrayBufferToBase64(pdfBytes),
       cues: cues.map((cue) => ({
@@ -466,6 +498,7 @@ export default function App() {
       blockAppearance,
       documentName,
       hiddenCueTypes,
+      lockedCueTypes,
       customCueTypes,
       notesPageSide,
       callingPageSide,
@@ -480,7 +513,7 @@ export default function App() {
 
   const loadProjectData = async (project) => {
     if (!project.pdfBase64) {
-      alert("Project file does not contain a PDF.");
+      showToast("Project file does not contain a PDF.", "error");
       return;
     }
 
@@ -530,6 +563,7 @@ export default function App() {
       ...current,
       ...migratedHiddenCueTypes,
     }));
+    setLockedCueTypes(project.lockedCueTypes || {});
     setCustomCueTypes(migratedCustomCueTypes.map((definition) => ({
       ...definition,
       icon: definition.icon || getDefaultCustomCueIcon(definition.kind),
@@ -584,10 +618,29 @@ export default function App() {
     return () => clearTimeout(migration);
   }, [pages, cues, notesPageSide]);
 
-  const pushUndo = (snapshot) => {
+  /* eslint-disable react-hooks/exhaustive-deps -- keyboard commands intentionally close over the latest editor state */
+  const createHistorySnapshot = (cueSnapshot = cues) => ({
+    cues: cueSnapshot.map((cue) => structuredClone(cue)),
+    margins: structuredClone(margins), colors: structuredClone(colors), styles: structuredClone(styles),
+    blockAppearance: structuredClone(blockAppearance), customCueTypes: structuredClone(customCueTypes),
+    hiddenCueTypes: structuredClone(hiddenCueTypes), lockedCueTypes: structuredClone(lockedCueTypes),
+    notesPageSide, callingPageSide, dividers: structuredClone(dividers), headers: structuredClone(headers),
+    dividersLocked, dividerAppearance: structuredClone(dividerAppearance), headerAppearance: structuredClone(headerAppearance),
+  });
+
+  const restoreHistorySnapshot = (snapshot) => {
+    setCues(snapshot.cues); setMargins(snapshot.margins); setColors(snapshot.colors); setStyles(snapshot.styles);
+    setBlockAppearance(snapshot.blockAppearance); setCustomCueTypes(snapshot.customCueTypes);
+    setHiddenCueTypes(snapshot.hiddenCueTypes); setLockedCueTypes(snapshot.lockedCueTypes || {});
+    setNotesPageSide(snapshot.notesPageSide); setCallingPageSide(snapshot.callingPageSide);
+    setDividers(snapshot.dividers); setHeaders(snapshot.headers); setDividersLocked(snapshot.dividersLocked);
+    setDividerAppearance(snapshot.dividerAppearance); setHeaderAppearance(snapshot.headerAppearance);
+  };
+
+  const pushUndo = (snapshot = cues) => {
     setRedoStack([]);
     setUndoStack((prev) =>
-      [snapshot.map((cue) => ({ ...cue })), ...prev].slice(0, 10)
+      [createHistorySnapshot(Array.isArray(snapshot) ? snapshot : cues), ...prev].slice(0, 30)
     );
   };
 
@@ -595,8 +648,8 @@ export default function App() {
     setRedoStack((prev) => {
       if (prev.length === 0) return prev;
       const [nextSnapshot, ...remaining] = prev;
-      setUndoStack((undo) => [cues.map((cue) => ({ ...cue })), ...undo].slice(0, 10));
-      setCues(nextSnapshot);
+      setUndoStack((undo) => [createHistorySnapshot(), ...undo].slice(0, 30));
+      restoreHistorySnapshot(nextSnapshot);
       markDirty();
       return remaining;
     });
@@ -607,8 +660,8 @@ export default function App() {
       if (prev.length === 0) return prev;
 
       const [lastSnapshot, ...remaining] = prev;
-      setRedoStack((redo) => [cues.map((cue) => ({ ...cue })), ...redo].slice(0, 10));
-      setCues(lastSnapshot);
+      setRedoStack((redo) => [createHistorySnapshot(), ...redo].slice(0, 30));
+      restoreHistorySnapshot(lastSnapshot);
       markDirty();
 
       return remaining;
@@ -619,7 +672,7 @@ export default function App() {
     const project = createProjectData();
 
     if (!project) {
-      alert("Load a PDF before saving a project.");
+      showToast("Load a PDF before saving a project.", "error");
       return false;
     }
 
@@ -628,7 +681,7 @@ export default function App() {
     if (!savedName) return false;
     setCurrentProjectPath(savedName);
     setIsDirty(false);
-    alert(`Project saved successfully as "${savedName}".`);
+    showToast(`Project saved successfully as "${savedName}".`, "success");
 
     return true;
   };
@@ -637,7 +690,7 @@ export default function App() {
     const project = createProjectData();
 
     if (!project) {
-      alert("Load a PDF before saving a project.");
+      showToast("Load a PDF before saving a project.", "error");
       return false;
     }
 
@@ -646,7 +699,7 @@ export default function App() {
     setCurrentProjectPath(fileName);
 
     setIsDirty(false);
-    alert(`Project saved successfully as "${fileName}".`);
+    showToast(`Project saved successfully as "${fileName}".`, "success");
 
     return true;
   };
@@ -660,6 +713,7 @@ export default function App() {
       styles,
       blockAppearance,
       hiddenCueTypes,
+      lockedCueTypes,
       customCueTypes,
       documentName,
       notesPageSide,
@@ -670,7 +724,7 @@ export default function App() {
       dividerAppearance,
       headerAppearance,
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, lockedCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance]);
 
   useEffect(() => {
     const saveSession = async () => {
@@ -681,7 +735,7 @@ export default function App() {
         const project = {
           app: "cue-pdf-annotator",
           appVersion: APP_VERSION,
-          version: 1,
+          version: PROJECT_SCHEMA_VERSION,
           savedAt: new Date().toISOString(),
           pdfBase64: arrayBufferToBase64(latest.pdfBytes),
           cues: latest.cues.map((cue) => ({
@@ -693,6 +747,7 @@ export default function App() {
           styles: latest.styles,
           blockAppearance: latest.blockAppearance,
           hiddenCueTypes: latest.hiddenCueTypes,
+          lockedCueTypes: latest.lockedCueTypes,
           customCueTypes: latest.customCueTypes,
           documentName: latest.documentName,
           notesPageSide: latest.notesPageSide,
@@ -723,7 +778,7 @@ export default function App() {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", saveWhenHidden);
     };
-  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance, compactCueProperties]);
+  }, [pdfBytes, cues, margins, colors, styles, blockAppearance, hiddenCueTypes, lockedCueTypes, customCueTypes, documentName, notesPageSide, callingPageSide, dividers, headers, dividersLocked, dividerAppearance, headerAppearance, compactCueProperties]);
 
   useEffect(() => {
     if (restoreAttemptedRef.current) return;
@@ -748,10 +803,181 @@ export default function App() {
     restorePreviousSession();
   }, []);
 
+  const duplicateSelectedCues = () => {
+    const selected = cues.filter((cue) => selectedCueIds.includes(cue.id) && !lockedCueTypes[cue.type]);
+    if (!selected.length) return;
+    pushUndo(cues);
+    const duplicates = selected.map((cue) => {
+      const copy = { ...cue, id: createId() };
+      for (const key of ["x", "x2", "left", "right"]) if (typeof copy[key] === "number") copy[key] += 12;
+      for (const key of ["y", "y2", "top", "bottom"]) if (typeof copy[key] === "number") copy[key] += 12;
+      return copy;
+    });
+    setCues((current) => [...current, ...duplicates]);
+    setSelectedCueIds(duplicates.map((cue) => cue.id));
+    setSelectedCueIdState(duplicates[0]?.id || null);
+    markDirty();
+  };
+
+  const nudgeSelectedCues = (dx, dy) => {
+    const selectedIds = new Set(selectedCueIds);
+    if (![...selectedIds].some((id) => { const cue = cues.find((item) => item.id === id); return cue && !lockedCueTypes[cue.type]; })) return;
+    pushUndo(cues);
+    setCues((current) => current.map((cue) => {
+      if (!selectedIds.has(cue.id) || lockedCueTypes[cue.type]) return cue;
+      const moved = { ...cue };
+      for (const key of ["x", "x2", "left", "right"]) if (typeof moved[key] === "number") moved[key] += dx;
+      for (const key of ["y", "y2", "top", "bottom"]) if (typeof moved[key] === "number") moved[key] += dy;
+      return moved;
+    }));
+    markDirty();
+  };
+
+  const moveSelectedCuesToPage = (page) => {
+    const selectedIds = new Set(selectedCueIds);
+    if (!selectedIds.size) return;
+    pushUndo(cues);
+    setCues((current) => current.map((cue) => selectedIds.has(cue.id) && !lockedCueTypes[cue.type] ? { ...cue, page } : cue));
+    markDirty();
+  };
+
+  const alignSelectedCues = (axis) => {
+    const selected = cues.filter((cue) => selectedCueIds.includes(cue.id) && !lockedCueTypes[cue.type]);
+    if (selected.length < 2) return;
+    const coordinate = axis === "x" ? (selected[0].left ?? selected[0].x) : (selected[0].top ?? selected[0].y);
+    pushUndo(cues);
+    const ids = new Set(selected.map((cue) => cue.id));
+    setCues((current) => current.map((cue) => {
+      if (!ids.has(cue.id)) return cue;
+      const anchor = axis === "x" ? (cue.left ?? cue.x) : (cue.top ?? cue.y);
+      const delta = coordinate - anchor;
+      const moved = { ...cue };
+      const keys = axis === "x" ? ["x", "x2", "left", "right"] : ["y", "y2", "top", "bottom"];
+      keys.forEach((key) => { if (typeof moved[key] === "number") moved[key] += delta; });
+      return moved;
+    }));
+    markDirty();
+  };
+
+  const distributeSelectedCues = () => {
+    const selected = cues.filter((cue) => selectedCueIds.includes(cue.id) && !lockedCueTypes[cue.type])
+      .sort((a, b) => (a.top ?? a.y) - (b.top ?? b.y));
+    if (selected.length < 3) return;
+    const first = selected[0].top ?? selected[0].y;
+    const last = selected[selected.length - 1].top ?? selected[selected.length - 1].y;
+    const targets = new Map(selected.map((cue, index) => [cue.id, first + ((last - first) * index) / (selected.length - 1)]));
+    pushUndo(cues);
+    setCues((current) => current.map((cue) => {
+      if (!targets.has(cue.id)) return cue;
+      const anchor = cue.top ?? cue.y;
+      const delta = targets.get(cue.id) - anchor;
+      const moved = { ...cue };
+      for (const key of ["y", "y2", "top", "bottom"]) if (typeof moved[key] === "number") moved[key] += delta;
+      return moved;
+    }));
+    markDirty();
+  };
+
+  const resetSelectedCueProperties = () => {
+    if (!selectedCueIds.length) return;
+    pushUndo(cues);
+    const ids = new Set(selectedCueIds);
+    setCues((current) => current.map((cue) => ids.has(cue.id) && !lockedCueTypes[cue.type] ? { ...cue, customProperties: undefined, customPropertiesEnabled: false } : cue));
+    markDirty();
+  };
+
+  const copySelectedCueProperties = () => {
+    const cue = cues.find((item) => item.id === selectedCueIds[0]);
+    if (cue) {
+      copiedCuePropertiesRef.current = getCueProperties(cue);
+      setHasCopiedCueProperties(true);
+    }
+  };
+
+  const pasteSelectedCueProperties = () => {
+    const copied = copiedCuePropertiesRef.current;
+    if (!copied || !selectedCueIds.length) return;
+    pushUndo(cues);
+    const selectedIds = new Set(selectedCueIds);
+    setCues((current) => current.map((cue) => {
+      if (!selectedIds.has(cue.id) || lockedCueTypes[cue.type]) return cue;
+      const compact = compactCueProperties(cue.type, copied);
+      return { ...cue, customProperties: Object.keys(compact).length ? compact : undefined, customPropertiesEnabled: Object.keys(compact).length > 0 };
+    }));
+    markDirty();
+  };
+
+  const goToPage = (page) => {
+    const nextPage = Math.max(0, Math.min(pages.length - 1, Number(page) || 0));
+    setCurrentPage(nextPage);
+    document.getElementById(`pdf-page-${nextPage}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const fitPageToViewport = (fitMode) => {
+    const page = pages[currentPage];
+    const editor = editorMainRef.current;
+    if (!page || !editor) return;
+    const availableWidth = editor.clientWidth - 70;
+    const availableHeight = editor.clientHeight - 70;
+    const pageWidth = page.width * (notesPageSide === "off" ? 1 : 2);
+    const nextScale = fitMode === "width" ? availableWidth / pageWidth : Math.min(availableWidth / pageWidth, availableHeight / page.height);
+    setDisplayScale(Math.min(2, Math.max(0.5, Math.round(nextScale * 20) / 20)));
+  };
+
+  const startPanelResize = (event, side, setter, storageKey) => {
+    event.preventDefault();
+    const move = (moveEvent) => {
+      const width = side === "right" ? window.innerWidth - moveEvent.clientX : moveEvent.clientX;
+      const bounded = Math.max(260, Math.min(620, width));
+      setter(bounded);
+      localStorage.setItem(storageKey, String(bounded));
+    };
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (editingCueId || editingHeaderId || isEditingDocumentName) return;
+        e.preventDefault();
+        if (appDialog) return closeAppDialog(appDialog.type === "prompt" ? null : false);
+        if (showHelp) return setShowHelp(false);
+        if (showFileMenu) return setShowFileMenu(false);
+        if (showTools && activeToolsView) return setActiveToolsView(null);
+        if (showTools) return setShowTools(false);
+        if (showOptionsDrawer) return setShowOptionsDrawer(false);
+        if (showInspector) return setShowInspector(false);
+        setSelectedCueId(null);
+        setSelectedDividerId(null);
+        setSelectedHeaderId(null);
+        setFadeStart(null);
+        setBlockStart(null);
+        setMode("POINTER");
+        return;
+      }
       const tag = e.target.tagName.toLowerCase();
       if (tag === "input" || tag === "select" || tag === "textarea") return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        saveCurrentProjectNative();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        duplicateSelectedCues();
+        return;
+      }
+
+      if (selectedCueIds.length && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+        e.preventDefault();
+        const amount = e.altKey ? 0.25 : e.shiftKey ? 10 : 1;
+        nudgeSelectedCues(e.key === "ArrowLeft" ? -amount : e.key === "ArrowRight" ? amount : 0, e.key === "ArrowUp" ? -amount : e.key === "ArrowDown" ? amount : 0);
+        return;
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && e.shiftKey) {
         e.preventDefault();
@@ -795,21 +1021,10 @@ export default function App() {
         markDirty();
 
         const selectedIds = new Set(selectedCueIds.length ? selectedCueIds : [selectedCueId]);
-        setCues((prev) => prev.filter((cue) => !selectedIds.has(cue.id)));
+        setCues((prev) => prev.filter((cue) => !selectedIds.has(cue.id) || lockedCueTypes[cue.type]));
         setSelectedCueId(null);
         setSelectedDividerId(null);
         setSelectedHeaderId(null);
-        return;
-      }
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSelectedCueId(null);
-        setSelectedDividerId(null);
-        setSelectedHeaderId(null);
-        setFadeStart(null);
-        setBlockStart(null);
-        setMode("POINTER");
         return;
       }
 
@@ -829,7 +1044,8 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [undoStack, redoStack, cues, selectedCueId, selectedCueIds, selectedDividerId, selectedHeaderId, dividersLocked, hiddenCueTypes]);
+  }, [activeToolsView, appDialog, cues, dividersLocked, duplicateSelectedCues, editingCueId, editingHeaderId, hiddenCueTypes, isEditingDocumentName, lockedCueTypes, nudgeSelectedCues, pushUndo, redoLastCueAction, redoStack, saveCurrentProjectNative, selectedCueId, selectedCueIds, selectedDividerId, selectedHeaderId, showFileMenu, showHelp, showInspector, showOptionsDrawer, showTools, undoLastCueAction, undoStack]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     const warnBeforeUnload = (event) => {
@@ -846,7 +1062,7 @@ export default function App() {
       const message = isDirty
         ? "You have unsaved changes. Loading a new PDF will replace the current PDF and remove its cues. Have you saved your changes?"
         : "Loading a new PDF will replace the current PDF and remove its cues. Do you want to continue?";
-      if (!window.confirm(message)) return false;
+      if (!await requestAppDialog({ type: "confirm", title: "Open a new PDF?", message, confirmLabel: "Open PDF", danger: true })) return false;
     }
     const selected = await choosePdfFile();
     if (!selected) return false;
@@ -854,6 +1070,18 @@ export default function App() {
     await loadPdf(selected.file);
 
     setCues([]);
+    setMargins({ ...DEFAULT_MARGINS });
+    setColors({ ...DEFAULT_COLORS });
+    setStyles(Object.fromEntries(Object.entries(DEFAULT_STYLES).map(([type, style]) => [type, { ...style }])));
+    setBlockAppearance({ ...DEFAULT_BLOCK_APPEARANCE });
+    setCustomCueTypes([]);
+    setHiddenCueTypes(Object.fromEntries(ALL_CUE_TYPES.map((type) => [type, false])));
+    setLockedCueTypes({});
+    setCueTypeFilters(Object.fromEntries(ALL_CUE_TYPES.map((type) => [type, true])));
+    setShowCustomCuesOnly(false);
+    setMode("POINTER");
+    setExpandedCueType(null);
+    setShowGeneralOptions(false);
     setDividers([]);
     setHeaders([]);
     setDividersLocked(false);
@@ -872,7 +1100,7 @@ export default function App() {
 
   const removePdf = async () => {
     if (!pdfBytes) return false;
-    if (isDirty && !window.confirm("Remove this PDF and discard its unsaved cues?")) return false;
+    if (isDirty && !await requestAppDialog({ type: "confirm", title: "Remove PDF?", message: "Remove this PDF and discard its unsaved cues?", confirmLabel: "Remove PDF", danger: true })) return false;
 
     clearPdf();
     setCues([]);
@@ -910,7 +1138,7 @@ export default function App() {
 
     } catch (err) {
       console.error("Open project failed:", err);
-      alert(`Open project failed: ${String(err)}`);
+      showToast(`Open project failed: ${String(err)}`, "error");
       return false;
     }
   };
@@ -921,16 +1149,16 @@ export default function App() {
       await loadProjectData(project);
       setCurrentProjectPath(null);
       setIsDirty(true);
-      alert("Autosave recovered. Save this project to keep it.");
+      showToast("Autosave recovered. Save this project to keep it.", "success");
       return true;
     } catch (err) {
       console.error("Autosave recovery failed:", err);
-      alert("No autosave could be recovered.");
+      showToast("No autosave could be recovered.", "error");
       return false;
     }
   };
 
-  const addCue = (pageIndex, x, y) => {
+  const addCue = async (pageIndex, x, y) => {
     if (mode === "POINTER") {
       setSelectedCueId(null);
       setSelectedDividerId(null);
@@ -939,6 +1167,7 @@ export default function App() {
       setBlockStart(null);
       return;
     }
+    if (lockedCueTypes[mode]) return;
     setSelectedDividerId(null);
     setSelectedHeaderId(null);
 
@@ -998,7 +1227,7 @@ export default function App() {
       return;
     }
 
-    const label = prompt(`Enter ${getDisplayCueTypeName(mode)} Cue:`);
+    const label = await requestAppDialog({ type: "prompt", title: `Add ${getDisplayCueTypeName(mode)} cue`, message: "Enter the cue text.", confirmLabel: "Add cue" });
     if (!label) return;
 
     pushUndo(cues);
@@ -1018,12 +1247,12 @@ export default function App() {
     ]);
   };
 
-  const updateCue = (id) => {
+  const updateCue = async (id) => {
     const cue = cues.find((c) => c.id === id);
-    if (!cue) return;
+    if (!cue || lockedCueTypes[cue.type]) return;
     setSelectedCueId(null);
 
-    const newLabel = prompt("Edit Cue:", cue.label);
+    const newLabel = await requestAppDialog({ type: "prompt", title: "Edit cue", message: "Update the cue text.", value: cue.label, confirmLabel: "Save" });
     if (newLabel === null) return;
     if (!newLabel && cue.type !== "FADE" && !isBlockCue(cue.type)) return;
 
@@ -1054,6 +1283,7 @@ export default function App() {
   const startDragCueLine = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
@@ -1098,6 +1328,7 @@ export default function App() {
   const startDragFreeCue = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
@@ -1140,6 +1371,7 @@ export default function App() {
   const startDragDcaCue = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
 
     const startSnapshot = cues.map((cue) => ({ ...cue }));
     const svg = e.currentTarget.ownerSVGElement;
@@ -1180,6 +1412,7 @@ export default function App() {
   const startDragFade = (e, cueId) => {
     e.stopPropagation();
     e.preventDefault();
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
 
     const original = cues.find((cue) => cue.id === cueId);
     if (!original) return;
@@ -1232,6 +1465,7 @@ export default function App() {
   };
 
   const startDragFadeHandle = (e, cueId, endpoint) => {
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
     e.stopPropagation();
     e.preventDefault();
 
@@ -1272,6 +1506,7 @@ export default function App() {
   };
 
   const startDragBlock = (e, cueId) => {
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
     e.stopPropagation();
     e.preventDefault();
     const original = cues.find((cue) => cue.id === cueId);
@@ -1319,6 +1554,7 @@ export default function App() {
   };
 
   const startDragBlockCorner = (e, cueId, corner) => {
+    if (lockedCueTypes[cues.find((cue) => cue.id === cueId)?.type]) return;
     e.stopPropagation();
     e.preventDefault();
     const snapshot = cues.map((cue) => ({ ...cue }));
@@ -1360,7 +1596,7 @@ export default function App() {
 
   const exportPDF = async () => {
     if (!pdfBytes) {
-      alert("Load a PDF first");
+      showToast("Load a PDF first.", "error");
       return false;
     }
 
@@ -1626,11 +1862,11 @@ export default function App() {
         `${getSafeProjectName(documentName)}.pdf`
       );
       if (!savedName) return false;
-      alert(`PDF exported successfully as "${savedName}".`);
+      showToast(`PDF exported successfully as "${savedName}".`, "success");
       return true;
     } catch (err) {
       console.error("EXPORT ERROR:", err);
-      alert("Export failed. Check console.");
+      showToast("Export failed. Check the console.", "error");
       return false;
     }
   };
@@ -1659,19 +1895,37 @@ export default function App() {
     setSelectedHeaderId(null);
     if (!additive) {
       setSelectedCueId(cueId);
+      cueSelectionAnchorRef.current = cueId;
       return;
     }
     setSelectedCueIds((current) => {
       const next = current.includes(cueId) ? current.filter((id) => id !== cueId) : [...current, cueId];
       setSelectedCueIdState(next.at(-1) || null);
+      cueSelectionAnchorRef.current = cueId;
       return next;
     });
   };
 
+  const selectCueListRange = (cueId, preserveExisting = false) => {
+    const anchorId = cueSelectionAnchorRef.current || selectedCueId;
+    const anchorIndex = filteredCues.findIndex((cue) => cue.id === anchorId);
+    const targetIndex = filteredCues.findIndex((cue) => cue.id === cueId);
+    if (anchorIndex < 0 || targetIndex < 0) {
+      updateCueSelection(cueId, preserveExisting);
+      return;
+    }
+    const [start, end] = [anchorIndex, targetIndex].sort((a, b) => a - b);
+    const rangeIds = filteredCues.slice(start, end + 1).map((cue) => cue.id);
+    setSelectedCueIds((current) => preserveExisting ? [...new Set([...current, ...rangeIds])] : rangeIds);
+    setSelectedCueIdState(cueId);
+  };
+
   const jumpToCue = (cue, event) => {
+    setCurrentPage(cue.page);
     setSelectedDividerId(null);
     setSelectedHeaderId(null);
-    updateCueSelection(cue.id, Boolean(event?.ctrlKey || event?.metaKey));
+    if (event?.shiftKey) selectCueListRange(cue.id, Boolean(event.ctrlKey || event.metaKey));
+    else updateCueSelection(cue.id, Boolean(event?.ctrlKey || event?.metaKey));
     cueRefs.current[cue.id]?.scrollIntoView({
       behavior: "smooth",
       block: "center",
@@ -1687,12 +1941,65 @@ export default function App() {
     updateCueSelection(cueId, e.ctrlKey || e.metaKey);
   };
 
+  const getCueSelectionBounds = (cue) => {
+    if (isBlockCue(cue.type)) return { left: cue.left, right: cue.right, top: cue.top, bottom: cue.bottom };
+    if (cue.type === "FADE") return { left: Math.min(cue.x, cue.x2), right: Math.max(cue.x, cue.x2), top: Math.min(cue.y, cue.y2), bottom: Math.max(cue.y, cue.y2) };
+    if (isMarginCue(cue.type)) {
+      const properties = getCueProperties(cue);
+      const halfHeight = (properties.style.markerHeight || DEFAULT_CUE_MARKER_HEIGHT) / 2;
+      return { left: Math.min(cue.x, properties.margin), right: Math.max(cue.x, properties.margin), top: cue.y - halfHeight, bottom: cue.y + halfHeight + properties.style.textSize };
+    }
+    const textWidth = Math.max(18, getCueDisplayText(cue).length * (getCueProperties(cue).style.textSize * 0.6));
+    return { left: cue.x, right: cue.x + textWidth, top: cue.y - getCueProperties(cue).style.textSize, bottom: cue.y + 4 };
+  };
+
+  const startMarqueeSelection = (event, pageIndex, documentOffset) => {
+    if (mode !== "POINTER" || event.target !== event.currentTarget || event.button !== 0) return;
+    event.preventDefault();
+    const svg = event.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const toPoint = (clientX, clientY) => ({
+      x: (clientX - rect.left) * (svg.viewBox.baseVal.width / rect.width) - documentOffset,
+      y: (clientY - rect.top) * (svg.viewBox.baseVal.height / rect.height),
+    });
+    const start = toPoint(event.clientX, event.clientY);
+    const preserveExisting = event.ctrlKey || event.metaKey || event.shiftKey;
+    let moved = false;
+    setSelectionBox({ page: pageIndex, x1: start.x, y1: start.y, x2: start.x, y2: start.y });
+    const move = (moveEvent) => {
+      const point = toPoint(moveEvent.clientX, moveEvent.clientY);
+      moved = moved || Math.abs(point.x - start.x) > 3 || Math.abs(point.y - start.y) > 3;
+      setSelectionBox({ page: pageIndex, x1: start.x, y1: start.y, x2: point.x, y2: point.y });
+    };
+    const up = (upEvent) => {
+      const end = toPoint(upEvent.clientX, upEvent.clientY);
+      setSelectionBox(null);
+      if (moved) {
+        const box = { left: Math.min(start.x, end.x), right: Math.max(start.x, end.x), top: Math.min(start.y, end.y), bottom: Math.max(start.y, end.y) };
+        const marqueeIds = cues.filter((cue) => cue.page === pageIndex && !hiddenCueTypes[cue.type]).filter((cue) => {
+          const bounds = getCueSelectionBounds(cue);
+          return bounds.right >= box.left && bounds.left <= box.right && bounds.bottom >= box.top && bounds.top <= box.bottom;
+        }).map((cue) => cue.id);
+        setSelectedCueIds((current) => preserveExisting ? [...new Set([...current, ...marqueeIds])] : marqueeIds);
+        setSelectedCueIdState(marqueeIds.at(-1) || (preserveExisting ? selectedCueId : null));
+        if (marqueeIds.length) cueSelectionAnchorRef.current = marqueeIds.at(-1);
+        suppressNextSvgClickRef.current = true;
+      } else if (!preserveExisting) {
+        setSelectedCueId(null);
+      }
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   const filteredCues = cues
     .filter((cue) => {
       if (cueTypeFilters[cue.type] === false) return false;
       if (showCustomCuesOnly && !cue.customPropertiesEnabled) return false;
 
-      const q = search.toLowerCase();
+      const q = deferredSearch.toLowerCase();
 
       return (
         getCueDisplayText(cue).toLowerCase().includes(q) ||
@@ -1740,6 +2047,7 @@ export default function App() {
   const renderCueTypeOptions = (type) => {
     const customDefinition = getCustomCueDefinition(type);
     const typeBlockAppearance = customDefinition?.blockAppearance || blockAppearance;
+    const typeAffixes = customDefinition || styles[type] || {};
     const appDefaultStyle = DEFAULT_STYLES[type];
     const isBuiltInType = ALL_CUE_TYPES.includes(type);
     const typeResetButton = (propertyName, onReset, isAtDefault) => isBuiltInType ? (
@@ -1748,6 +2056,7 @@ export default function App() {
       </button>
     ) : null;
     const updateTypeBlockAppearance = (updates) => {
+      pushUndo();
       const definition = getCustomCueDefinition(type);
       if (definition) {
         setCustomCueTypes((current) => current.map((item) => item.id === type
@@ -1758,14 +2067,24 @@ export default function App() {
       }
       markDirty();
     };
+    const updateTypeAffix = (property, value) => {
+      pushUndo();
+      if (customDefinition) {
+        setCustomCueTypes((current) => current.map((item) => item.id === type ? { ...item, [property]: value } : item));
+      } else {
+        setStyles((current) => ({ ...current, [type]: { ...current[type], [property]: value } }));
+      }
+      markDirty();
+    };
     return (
     <div className="accordion-options" style={{ "--cue-color": colors[type] }}>
+      <label><span>Lock all {getDisplayCueTypeName(type)} cues</span><input type="checkbox" checked={Boolean(lockedCueTypes[type])} onChange={(event) => { pushUndo(); setLockedCueTypes((current) => ({ ...current, [type]: event.target.checked })); markDirty(); }} /></label>
       {type === "FADE" && <p>{fadeStart ? "Click the fade end point" : "Click the fade start point"}</p>}
       {isBlockCue(type) && <p>{blockStart ? "Click the opposite corner" : "Click the first corner"}</p>}
 
-      {customDefinition && <>
-        <label>Text prefix <input className="cue-affix-input" type="text" value={customDefinition.prefix || ""} placeholder="None" onChange={(event) => { const prefix = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === type ? { ...item, prefix } : item)); markDirty(); }} /></label>
-        <label>Text suffix <input className="cue-affix-input" type="text" value={customDefinition.suffix || ""} placeholder="None" onChange={(event) => { const suffix = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === type ? { ...item, suffix } : item)); markDirty(); }} /></label>
+      {(customDefinition || MARGIN_CUE_TYPES.includes(type)) && <>
+        <label>Text prefix <span className="cue-option-control"><input className="cue-affix-input" type="text" value={typeAffixes.prefix || ""} placeholder="None" onChange={(event) => updateTypeAffix("prefix", event.target.value)} />{typeResetButton("text prefix", () => updateTypeAffix("prefix", ""), !typeAffixes.prefix)}</span></label>
+        <label>Text suffix <span className="cue-option-control"><input className="cue-affix-input" type="text" value={typeAffixes.suffix || ""} placeholder="None" onChange={(event) => updateTypeAffix("suffix", event.target.value)} />{typeResetButton("text suffix", () => updateTypeAffix("suffix", ""), !typeAffixes.suffix)}</span></label>
       </>}
 
       {!isBlockCue(type) && (
@@ -1853,8 +2172,8 @@ export default function App() {
       <button
         type="button"
         className="reset-cue-properties-button"
-        onClick={() => {
-          if (!window.confirm(`Reset every ${getDisplayCueTypeName(type)} cue to the cue type properties? This will clear their saved custom properties.`)) return;
+        onClick={async () => {
+          if (!await requestAppDialog({ type: "confirm", title: `Reset ${getDisplayCueTypeName(type)} cues?`, message: `Reset every ${getDisplayCueTypeName(type)} cue to the cue type properties? This will clear their saved custom properties.`, confirmLabel: "Reset cues", danger: true })) return;
           setCues((current) => current.map((cue) => cue.type === type
             ? { ...cue, customPropertiesEnabled: false, customProperties: undefined }
             : cue));
@@ -1882,7 +2201,7 @@ export default function App() {
     );
 
     return (
-      <fieldset className="inspector-properties">
+      <fieldset className="inspector-properties" disabled={Boolean(lockedCueTypes[cue.type])}>
         {!isBlockCue(cue.type) ? (
           <label><span>Colour</span><PaletteColorInput value={properties.color} onCommit={(value) => updateRoot("color", value)} />{resetButton("colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
         ) : (
@@ -1921,7 +2240,7 @@ export default function App() {
     const applyOverride = (section, key, value) => {
       const selectedIds = new Set(selectedCues.map((cue) => cue.id));
       setCues((current) => current.map((cue) => {
-        if (!selectedIds.has(cue.id)) return cue;
+        if (!selectedIds.has(cue.id) || lockedCueTypes[cue.type]) return cue;
         const defaults = getTypeProperties(cue.type);
         const defaultValue = section ? defaults[section][key] : defaults[key];
         const customProperties = compactCueProperties(cue.type, cue.customProperties);
@@ -2012,7 +2331,7 @@ export default function App() {
       if (completed) setShowFileMenu(false);
     } catch (err) {
       console.error(`${actionName} failed:`, err);
-      alert(`${actionName} failed. Check the console for details.`);
+      showToast(`${actionName} failed. Check the console for details.`, "error");
     } finally {
       setFileActionInProgress(null);
     }
@@ -2032,6 +2351,7 @@ export default function App() {
   const callingPageHasContent = callingPageHasCues;
 
   const addDivider = () => {
+    pushUndo();
     const dividerId = createId();
     setDividers((current) => [
       ...current,
@@ -2050,6 +2370,7 @@ export default function App() {
   };
 
   const addHeader = () => {
+    pushUndo();
     const headerId = createId();
     setHeaders((current) => [
       ...current,
@@ -2071,6 +2392,7 @@ export default function App() {
 
   const removeHeader = (headerId) => {
     if (dividersLocked) return;
+    pushUndo();
     setHeaders((current) => current.filter((header) => header.id !== headerId));
     setSelectedHeaderId((current) => current === headerId ? null : current);
     markDirty();
@@ -2085,9 +2407,9 @@ export default function App() {
     setEditingHeaderId(header.id);
   };
 
-  const editHeaderWithPrompt = (header) => {
+  const editHeaderWithPrompt = async (header) => {
     if (dividersLocked) return;
-    const nextText = window.prompt("Edit header:", header.text);
+    const nextText = await requestAppDialog({ type: "prompt", title: "Edit header", message: "Update the header text.", value: header.text, confirmLabel: "Save" });
     if (nextText === null || !nextText.trim()) return;
     setHeaders((current) => current.map((item) =>
       item.id === header.id ? { ...item, text: nextText.trim() } : item
@@ -2106,9 +2428,10 @@ export default function App() {
     setEditingHeaderId(null);
   };
 
-  const resetDividersAndHeaders = () => {
+  const resetDividersAndHeaders = async () => {
     if (dividersLocked) return;
-    if (!window.confirm("Remove all dividers and headers? This cannot be undone.")) return;
+    if (!await requestAppDialog({ type: "confirm", title: "Remove dividers and headers?", message: "Remove all dividers and headers? This can be restored with Undo.", confirmLabel: "Remove all", danger: true })) return;
+    pushUndo();
     setDividers([]);
     setHeaders([]);
     setSelectedDividerId(null);
@@ -2119,6 +2442,7 @@ export default function App() {
 
   const removeDivider = (dividerId) => {
     if (dividersLocked) return;
+    pushUndo();
     setDividers((current) => current.filter((divider) => divider.id !== dividerId));
     setSelectedDividerId((current) => current === dividerId ? null : current);
     markDirty();
@@ -2170,7 +2494,7 @@ export default function App() {
 
   const setCallingPageEnabled = (enabled) => {
     if (!enabled && callingPageHasContent) {
-      alert("The Prompt/Showcall Page cannot be disabled while it contains cues or dividers. Move or remove them first.");
+      showToast("The Prompt/Showcall Page cannot be disabled while it contains cues or dividers. Move or remove them first.", "error");
       return;
     }
     if (!enabled) {
@@ -2191,6 +2515,7 @@ export default function App() {
   const addCustomCueType = () => {
     const name = customCueTypeName.trim();
     if (!name) return;
+    pushUndo();
     const id = `CUSTOM_${customCueTypeKind}_${createId()}`;
     const baseType = customCueTypeKind === "POINT" ? "SFX" : customCueTypeKind === "BLOCK" ? "BLOCK" : "NOTE";
     const definition = {
@@ -2205,7 +2530,7 @@ export default function App() {
     setCustomCueTypes((current) => [...current, definition]);
     setColors((current) => ({ ...current, [id]: current[baseType] }));
     setStyles((current) => ({ ...current, [id]: { ...current[baseType] } }));
-    if (customCueTypeKind === "POINT") setMargins((current) => ({ ...current, [id]: current.SFX }));
+    if (customCueTypeKind === "POINT") setMargins((current) => ({ ...current, [id]: 75 }));
     setHiddenCueTypes((current) => ({ ...current, [id]: false }));
     setCueTypeFilters((current) => ({ ...current, [id]: true }));
     setCustomCueTypeName("");
@@ -2215,10 +2540,11 @@ export default function App() {
     markDirty();
   };
 
-  const removeCustomCueType = (definition) => {
+  const removeCustomCueType = async (definition) => {
     const cueCount = cues.filter((cue) => cue.type === definition.id).length;
     const cueMessage = cueCount === 1 ? "1 cue" : `${cueCount} cues`;
-    if (!window.confirm(`Remove the custom cue type “${definition.name}”? ${cueMessage} of this type will be permanently deleted.`)) return;
+    if (!await requestAppDialog({ type: "confirm", title: `Remove ${definition.name}?`, message: `${cueMessage} of this type will be deleted. This can be restored with Undo.`, confirmLabel: "Remove cue type", danger: true })) return;
+    pushUndo();
     const withoutType = (current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== definition.id));
     setCues((current) => current.filter((cue) => cue.type !== definition.id));
     setCustomCueTypes((current) => current.filter((item) => item.id !== definition.id));
@@ -2233,11 +2559,11 @@ export default function App() {
     markDirty();
   };
 
-  const convertCueType = () => {
+  const convertCueType = async () => {
     if (!convertFromType || !convertToType || convertFromType === convertToType) return;
     const affected = cues.filter((cue) => cue.type === convertFromType);
     if (!affected.length) return;
-    if (!window.confirm(`Convert ${affected.length} ${getDisplayCueTypeName(convertFromType)} cue${affected.length === 1 ? "" : "s"} to ${getDisplayCueTypeName(convertToType)}? Per-cue custom properties will be cleared.`)) return;
+    if (!await requestAppDialog({ type: "confirm", title: "Convert cue types?", message: `Convert ${affected.length} ${getDisplayCueTypeName(convertFromType)} cue${affected.length === 1 ? "" : "s"} to ${getDisplayCueTypeName(convertToType)}? Per-cue custom properties will be cleared.`, confirmLabel: "Convert cues", danger: true })) return;
     pushUndo(cues);
     setCues((current) => current.map((cue) => {
       if (cue.type !== convertFromType) return cue;
@@ -2278,12 +2604,12 @@ export default function App() {
     ? cues.filter((cue) => cue.type === findReplaceType && cue.label.includes(findText))
     : [];
 
-  const replaceCueText = () => {
+  const replaceCueText = async () => {
     if (!findReplaceType || !findText || !findReplaceMatches.length) return;
     const action = replaceText
       ? `replace “${findText}” with “${replaceText}”`
       : `remove “${findText}”`;
-    if (!window.confirm(`This will ${action} in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}. This can change a large amount of data. The safest option is to download a saved copy of the showfile before proceeding. Continue?`)) return;
+    if (!await requestAppDialog({ type: "confirm", title: "Apply find and replace?", message: `This will ${action} in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}. This can change a large amount of data. The safest option is to download a saved copy first.`, confirmLabel: "Apply changes", danger: true })) return;
     pushUndo(cues);
     setCues((current) => current.map((cue) => cue.type === findReplaceType && cue.label.includes(findText)
       ? { ...cue, label: cue.label.split(findText).join(replaceText) }
@@ -2340,6 +2666,7 @@ export default function App() {
                 <MaterialIcon path={mdiPencil} />
               </button>
             )}
+            <span className={`save-state ${isDirty ? "is-dirty" : ""}`}>{isDirty ? "Unsaved changes" : lastAutosave ? `Autosaved ${lastAutosave}` : "Saved"}</span>
           </div>
           <button className="toolbar-primary" onClick={() => setShowFileMenu(true)}><ToolbarIcon name="save" />Save / Load</button>
           <button onClick={undoLastCueAction} disabled={undoStack.length === 0}><ToolbarIcon name="undo" />Undo</button>
@@ -2394,6 +2721,14 @@ export default function App() {
             ))}
           </div>
           <div className="tool-toolbar-group view-tool-group">
+            <div className="page-navigation" aria-label="Page navigation">
+              <button type="button" disabled={!pages.length || currentPage === 0} onClick={() => goToPage(currentPage - 1)} aria-label="Previous page">‹</button>
+              <label>Page <input type="number" min="1" max={Math.max(1, pages.length)} value={pages.length ? currentPage + 1 : 0} disabled={!pages.length} onChange={(event) => goToPage(Number(event.target.value) - 1)} /> / {pages.length}</label>
+              <button type="button" disabled={!pages.length || currentPage >= pages.length - 1} onClick={() => goToPage(currentPage + 1)} aria-label="Next page">›</button>
+              <button type="button" disabled={!pages.length} onClick={() => fitPageToViewport("width")}>Fit width</button>
+              <button type="button" disabled={!pages.length} onClick={() => fitPageToViewport("page")}>Fit page</button>
+              <button type="button" disabled={!pages.length} onClick={() => setDisplayScale(1)}>100%</button>
+            </div>
             <button
               className={`tool-layout-button ${pageLayout === "single" ? "is-active" : ""}`}
               onClick={() => setPageLayout("single")}
@@ -2440,7 +2775,8 @@ export default function App() {
           </div>
         </nav>
 
-        <div className={`options-drawer ${showOptionsDrawer || showInspector ? "is-open" : ""}`}>
+        <div className={`options-drawer ${showOptionsDrawer || showInspector ? "is-open" : ""}`} style={{ width: drawerWidth }}>
+          <div className="panel-resize-handle panel-resize-handle--left" onMouseDown={(event) => startPanelResize(event, "right", setDrawerWidth, "scriptMarkupDrawerWidth")} />
           {showInspector ? (
             <>
               <div className="inspector-header">
@@ -2496,6 +2832,7 @@ export default function App() {
             <h2>Tool Options</h2>
             <button onClick={() => setShowOptionsDrawer(false)} aria-label="Close options">×</button>
           </div>
+          <input className="options-search" type="search" placeholder="Search cue types and settings…" value={optionsSearch} onChange={(event) => setOptionsSearch(event.target.value)} />
           <section className="cue-option-section general-options-section" style={{ "--cue-color": "#374151" }}>
             <button
               className={`cue-option-trigger ${showGeneralOptions ? "is-expanded" : ""}`}
@@ -2630,7 +2967,7 @@ export default function App() {
             </div>}
           </section>
           <div className="cue-options-accordion">
-            {cueToolButtons.filter((tool) => tool.type !== "POINTER" && !hiddenCueTypes[tool.type]).map(({ type, icon }) => {
+            {cueToolButtons.filter((tool) => tool.type !== "POINTER" && !hiddenCueTypes[tool.type] && (!optionsSearch || `${tool.label} colour margin prefix suffix text line fill opacity marker lock`.toLowerCase().includes(optionsSearch.toLowerCase()))).map(({ type, icon }) => {
               const isExpanded = expandedCueType === type;
               return (
                 <section className="cue-option-section" key={type} style={{ "--cue-color": colors[type] }}>
@@ -2861,6 +3198,17 @@ export default function App() {
           )}
         </div>
 
+        {toast && <div className={`app-toast app-toast--${toast.tone}`} role="status">{toast.message}</div>}
+
+        {appDialog && <div className="modal-backdrop app-dialog-backdrop" onMouseDown={() => closeAppDialog(appDialog.type === "prompt" ? null : false)}>
+          <form className="app-modal app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" onSubmit={(event) => { event.preventDefault(); closeAppDialog(appDialog.type === "prompt" ? appDialog.value : true); }} onMouseDown={(event) => event.stopPropagation()}>
+            <h2 id="app-dialog-title">{appDialog.title}</h2>
+            {appDialog.message && <p>{appDialog.message}</p>}
+            {appDialog.type === "prompt" && <input autoFocus value={appDialog.value} onChange={(event) => setAppDialog((current) => ({ ...current, value: event.target.value }))} />}
+            <div className="app-dialog-actions"><button type="button" onClick={() => closeAppDialog(appDialog.type === "prompt" ? null : false)}>Cancel</button><button type="submit" className={appDialog.danger ? "is-danger" : ""}>{appDialog.confirmLabel}</button></div>
+          </form>
+        </div>}
+
         {showTools && (
           <div className="modal-backdrop" onMouseDown={() => { setShowTools(false); setActiveToolsView(null); }}>
             <section className="app-modal save-load-modal tools-modal" onMouseDown={(event) => event.stopPropagation()}>
@@ -2884,6 +3232,8 @@ export default function App() {
                   <button type="button" className="tools-back" onClick={() => setActiveToolsView(null)}>← All tools</button>
                   <label><span>From</span><select value={convertFromType} onChange={(event) => setConvertFromType(event.target.value)}><option value="">Select type</option>{availableCueTypes.map((type) => <option key={type} value={type}>{getDisplayCueTypeLabel(type)}</option>)}</select></label>
                   <label><span>To</span><select value={convertToType} onChange={(event) => setConvertToType(event.target.value)}><option value="">Select type</option>{availableCueTypes.map((type) => <option key={type} value={type}>{getDisplayCueTypeLabel(type)}</option>)}</select></label>
+                  {convertFromType && <div className="bulk-preview"><strong>Preview</strong>{cues.filter((cue) => cue.type === convertFromType).slice(0, 10).map((cue) => <div key={cue.id}><span>{getCueDisplayText(cue)}</span><span>→ {getDisplayCueTypeLabel(convertToType || cue.type)}</span></div>)}</div>}
+                  <button type="button" className="secondary-action" onClick={saveCurrentProjectNative} disabled={!pdfBytes}>Download backup first</button>
                   <button type="button" disabled={!convertFromType || !convertToType || convertFromType === convertToType || !cues.some((cue) => cue.type === convertFromType)} onClick={convertCueType}>
                     Convert {convertFromType ? cues.filter((cue) => cue.type === convertFromType).length : 0} cues
                   </button>
@@ -2896,6 +3246,8 @@ export default function App() {
                   <label><span>Find</span><input type="text" value={findText} onChange={(event) => setFindText(event.target.value)} placeholder="Exact text, including spaces and punctuation" /></label>
                   <label><span>Replace</span><input type="text" value={replaceText} onChange={(event) => setReplaceText(event.target.value)} placeholder="Leave blank to remove the found text" /></label>
                   <p className="literal-match-note">Matching is case-sensitive and literal. Spaces and punctuation are included exactly as entered.</p>
+                  {findReplaceMatches.length > 0 && <div className="bulk-preview"><strong>Preview</strong>{findReplaceMatches.slice(0, 10).map((cue) => <div key={cue.id}><span>{cue.label}</span><span>→ {cue.label.split(findText).join(replaceText)}</span></div>)}</div>}
+                  <button type="button" className="secondary-action" onClick={saveCurrentProjectNative} disabled={!pdfBytes}>Download backup first</button>
                   <button type="button" disabled={!findReplaceType || !findText || !findReplaceMatches.length} onClick={replaceCueText}>
                     {replaceText
                       ? `Replace “${findText}” with “${replaceText}” in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}`
@@ -2924,7 +3276,20 @@ export default function App() {
                   </div>
                   {customCueTypes.length > 0 && <div className="custom-cue-type-list">
                     <strong>Custom cue types</strong>
-                    {customCueTypes.map((definition) => <div className="custom-cue-type-row" key={definition.id}>
+                    {customCueTypes.map((definition) => <div className="custom-cue-type-row" key={definition.id} draggable onDragStart={() => { draggedCustomTypeIdRef.current = definition.id; }} onDragOver={(event) => event.preventDefault()} onDrop={() => {
+                      const draggedId = draggedCustomTypeIdRef.current;
+                      if (!draggedId || draggedId === definition.id) return;
+                      setCustomCueTypes((current) => {
+                        const next = [...current];
+                        const from = next.findIndex((item) => item.id === draggedId);
+                        const to = next.findIndex((item) => item.id === definition.id);
+                        const [moved] = next.splice(from, 1);
+                        next.splice(to, 0, moved);
+                        return next;
+                      });
+                      draggedCustomTypeIdRef.current = null;
+                      markDirty();
+                    }}>
                       <MaterialIcon path={CUSTOM_CUE_ICON_PATHS[definition.icon] || CUSTOM_CUE_ICON_PATHS[getDefaultCustomCueIcon(definition.kind)]} />
                       <span>{definition.kind === "POINT" ? "Cue Point" : definition.kind === "BLOCK" ? "Block" : "Note"}</span>
                       <input type="text" value={definition.name} onChange={(event) => { const name = event.target.value; setCustomCueTypes((current) => current.map((item) => item.id === definition.id ? { ...item, name } : item)); markDirty(); }} />
@@ -2991,7 +3356,7 @@ export default function App() {
                 <div>
                   <span className="modal-eyebrow">SCRIPT MARKUP APP</span>
                   <h2>Help &amp; Guide</h2>
-                  <p>Mark up, organise, save, and export your PDF cue sheets.</p>
+                  <p>Version {APP_VERSION} · Mark up, organise, save, and export PDF cue sheets.</p>
                 </div>
                 <button className="modal-close" onClick={() => setShowHelp(false)} aria-label="Close">×</button>
               </div>
@@ -3012,10 +3377,30 @@ export default function App() {
                     <h3>Creating cues</h3>
                     <ul>
                       <li><strong>SFX, Scene, and DCA</strong> create margin-based annotations.</li>
-                      <li><strong>Note, Warn, and Mark</strong> place text directly on the page.</li>
+                      <li><strong>Note</strong> and custom Note types place text directly on the page.</li>
                       <li>Select <strong>Pointer</strong> when you want to work without adding cues.</li>
                       <li>Drag cues and their handles without changing the current selection.</li>
                       <li>Rename a cue by double-clicking it on the page or editing its name in the cue list.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Selecting &amp; bulk editing</h3>
+                    <ul>
+                      <li>With Pointer active, drag across empty page space to marquee-select cues.</li>
+                      <li>Ctrl/Cmd-click toggles cues; Shift-click in the cue list selects a visible range.</li>
+                      <li>The cue-list selection panel can duplicate, align, distribute, move, reset, or transfer properties.</li>
+                      <li>Lock every cue of a type from its Options accordion when a completed cue layer should not change.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Custom types &amp; Tools</h3>
+                    <ul>
+                      <li>Use <strong>Tools → Manage Cue Types</strong> to create Cue Point, Note, or Block types with custom names and icons.</li>
+                      <li>Custom types support their own appearance, prefix, suffix, visibility, ordering, and lock state.</li>
+                      <li>Convert Cue Types and Find &amp; Replace show previews and offer a backup action before bulk changes.</li>
+                      <li>Bulk text matching is literal and case-sensitive, including spaces and punctuation.</li>
                     </ul>
                   </article>
 
@@ -3055,7 +3440,7 @@ export default function App() {
                     <h3>View &amp; visibility</h3>
                     <ul>
                       <li>Switch between stacked and side-by-side page layouts in the tool strip.</li>
-                      <li>Use <strong>Scale</strong> to resize pages without changing export geometry.</li>
+                      <li>Use Scale, Ctrl/Cmd-scroll, Fit Width, Fit Page, or 100% without changing export geometry.</li>
                       <li>Toggle the cue list from the button beside the scale control.</li>
                       <li>Hidden cue types remain saved but do not appear on pages or PDF exports.</li>
                       <li>Only one Options accordion can be open at a time.</li>
@@ -3068,8 +3453,9 @@ export default function App() {
                       <li>Expand any tool row to change its colour, text size, line width, or margin.</li>
                       <li>BLOCK additionally supports fill colour, opacity, no fill, and no line.</li>
                       <li>Search cues by name, type, or page from the cue list.</li>
+                      <li>Search Options by cue type or setting name.</li>
                       <li>The Filter accordion controls which cue types appear in the list.</li>
-                      <li>Click a cue-list name to edit it inline; moving or editing a cue does not automatically select it.</li>
+                      <li>Drag the cue list or drawer edge to resize it; the browser remembers the width.</li>
                     </ul>
                   </article>
 
@@ -3103,11 +3489,19 @@ export default function App() {
                     <kbd>Ctrl/Cmd + Z</kbd><span>Undo the last cue action.</span>
                     <kbd>Ctrl/Cmd + Shift + Z</kbd><span>Redo the last undone action.</span>
                     <kbd>Ctrl/Cmd + Y</kbd><span>Redo on Windows-style keyboards.</span>
+                    <kbd>Ctrl/Cmd + S</kbd><span>Download a timestamped project copy.</span>
+                    <kbd>Ctrl/Cmd + D</kbd><span>Duplicate selected unlocked cues.</span>
+                    <kbd>Arrow keys</kbd><span>Nudge selected cues; use Shift for 10 units or Alt/Option for 0.25 units.</span>
+                    <kbd>Ctrl/Cmd-click</kbd><span>Toggle cues in a multiple selection.</span>
+                    <kbd>Shift-click</kbd><span>Select a visible range in the cue list.</span>
+                    <kbd>Pointer drag</kbd><span>Marquee-select visible cues intersecting the selection box.</span>
                     <kbd>Double-click</kbd><span>Edit a cue, fade, block, or header label.</span>
                     <kbd>Drag</kbd><span>Move cues, dividers, and headers, or adjust visible handles.</span>
-                    <kbd>F / 7</kbd><span>Select Fade. Use B / 8 to select Block.</span>
+                    <kbd>F / 5</kbd><span>Select Fade. Use B / 6 to select Block.</span>
                   </div>
                 </article>
+
+                <p className="help-docs-link">Full documentation: <a href="https://github.com/staljabro/script-markup-app/tree/main/docs" target="_blank" rel="noreferrer">GitHub documentation handbook</a></p>
               </div>
             </section>
           </div>
@@ -3120,6 +3514,7 @@ export default function App() {
           return (
           <div
             key={pageIndex}
+            id={`pdf-page-${pageIndex}`}
             className={`pdf-page${notesPageSide !== "off" ? " pdf-page--combined" : ""}`}
             style={{
               width: `${combinedWidth * displayScale}px`,
@@ -3167,6 +3562,7 @@ export default function App() {
                 height: "100%",
                 pointerEvents: "all",
               }}
+              onMouseDown={(event) => startMarqueeSelection(event, pageIndex, documentOffset)}
               onClick={(e) => {
                 if (suppressNextSvgClickRef.current) {
                   suppressNextSvgClickRef.current = false;
@@ -3187,6 +3583,14 @@ export default function App() {
               }}
             >
               <g transform={`translate(${documentOffset} 0)`}>
+              {selectionBox?.page === pageIndex && <rect
+                className="cue-selection-marquee"
+                x={Math.min(selectionBox.x1, selectionBox.x2)}
+                y={Math.min(selectionBox.y1, selectionBox.y2)}
+                width={Math.abs(selectionBox.x2 - selectionBox.x1)}
+                height={Math.abs(selectionBox.y2 - selectionBox.y1)}
+                pointerEvents="none"
+              />}
               {dividers.filter((divider) => divider.surface === "pdf" || notesPageSide !== "off").map((divider) => {
                 const dividerX = divider.surface === "pdf"
                   ? divider.position * p.width
@@ -3673,9 +4077,10 @@ export default function App() {
                     width={12}
                     height={p.height}
                     fill="transparent"
-                    style={{ cursor: "ew-resize" }}
+                    style={{ cursor: lockedCueTypes[type] ? "default" : "ew-resize" }}
                     onMouseDown={(e) => {
                       e.stopPropagation();
+                      if (lockedCueTypes[type]) return;
 
                       const svg = e.currentTarget.ownerSVGElement;
                       const rect = svg.getBoundingClientRect();
@@ -3726,8 +4131,21 @@ export default function App() {
       </main>
 
       {showCueList && (
-        <aside className="cue-list-panel">
+        <aside className="cue-list-panel" style={{ width: cueListWidth }}>
+          <div className="panel-resize-handle panel-resize-handle--right" onMouseDown={(event) => startPanelResize(event, "left", setCueListWidth, "scriptMarkupCueListWidth")} />
           <h3 style={{ marginTop: 0 }}>Cue List</h3>
+
+          {selectedCueIds.length > 0 && <div className="selection-actions">
+            <strong>{selectedCueIds.length} selected</strong>
+            <button type="button" onClick={duplicateSelectedCues}>Duplicate</button>
+            <button type="button" onClick={copySelectedCueProperties}>Copy properties</button>
+            <button type="button" disabled={!hasCopiedCueProperties} onClick={pasteSelectedCueProperties}>Paste properties</button>
+            <button type="button" onClick={resetSelectedCueProperties}>Reset properties</button>
+            <button type="button" disabled={selectedCueIds.length < 2} onClick={() => alignSelectedCues("x")}>Align X</button>
+            <button type="button" disabled={selectedCueIds.length < 2} onClick={() => alignSelectedCues("y")}>Align Y</button>
+            <button type="button" disabled={selectedCueIds.length < 3} onClick={distributeSelectedCues}>Distribute Y</button>
+            <label>Move to page <select value="" onChange={(event) => { if (event.target.value !== "") moveSelectedCuesToPage(Number(event.target.value)); }}><option value="">Choose…</option>{pages.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}</select></label>
+          </div>}
 
           <input
             className="cue-search"
@@ -3828,6 +4246,8 @@ export default function App() {
             Showing {filteredCues.length} of {cues.length}
           </div>
 
+          {filteredCues.length === 0 && <div className="cue-list-empty">{cues.length ? "No cues match the current search and filters." : "No cues yet. Choose a cue tool and click a page to add one."}</div>}
+
           {filteredCues.map((cue) => (
             <div
               key={cue.id}
@@ -3870,7 +4290,8 @@ export default function App() {
                   className="cue-name-display"
                   onClick={(e) => {
                     e.stopPropagation();
-                    beginEditingCueName(cue);
+                    if (e.shiftKey || e.ctrlKey || e.metaKey) jumpToCue(cue, e);
+                    else beginEditingCueName(cue);
                   }}
                   title="Rename cue"
                 >
