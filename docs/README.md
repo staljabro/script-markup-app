@@ -1,6 +1,6 @@
 # Script Markup App documentation
 
-This documentation applies to Script Markup App 1.0.0.
+This documentation applies to Script Markup App 1.1.1.
 
 ## User guide
 
@@ -26,6 +26,7 @@ This documentation applies to Script Markup App 1.0.0.
 - **Prompt/Showcall page** means the optional blank page paired with a PDF page.
 - **Cue type properties** apply to every cue of a type.
 - **Custom cue properties** are per-cue overrides.
+- **Text box content** is edited in the Inspector, with multiline text and formatting for individual selections. See [Text boxes](cue-inspector.md#text-boxes).
 - Destructive bulk actions show a confirmation and can be restored with Undo while the history remains available.
 
 [Back to repository README](../README.md)

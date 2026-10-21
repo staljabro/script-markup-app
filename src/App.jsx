@@ -52,6 +52,8 @@ import {
 } from "@mdi/js";
 import { usePdfRenderer } from "./hooks/usePdfRenderer";
 import { APP_VERSION, PROJECT_SCHEMA_VERSION } from "./version";
+import TextBoxEditor from "./components/TextBoxEditor";
+import { editText, layoutTextBox, measureTextBox } from "./lib/textBoxes";
 import {
   arrayBufferToBase64,
   base64ToArrayBuffer,
@@ -68,7 +70,7 @@ import {
 const MARGIN_CUE_TYPES = ["SFX", "TM", "DCA"];
 const FREE_CUE_TYPES = ["NOTE"];
 const LINE_CUE_TYPES = ["FADE"];
-const AREA_CUE_TYPES = ["BLOCK"];
+const AREA_CUE_TYPES = ["BLOCK", "TEXTBOX"];
 const ALL_CUE_TYPES = [...MARGIN_CUE_TYPES, ...LINE_CUE_TYPES, ...AREA_CUE_TYPES, ...FREE_CUE_TYPES];
 
 const getCueBaseType = (type) => {
@@ -80,12 +82,12 @@ const getCueBaseType = (type) => {
 
 const isMarginCue = (type) => MARGIN_CUE_TYPES.includes(getCueBaseType(type));
 const isFreeCue = (type) => FREE_CUE_TYPES.includes(getCueBaseType(type));
-const isBlockCue = (type) => getCueBaseType(type) === "BLOCK";
+const isBlockCue = (type) => ["BLOCK", "TEXTBOX"].includes(getCueBaseType(type));
 const isPointCue = (type) => ["SFX", "TM"].includes(getCueBaseType(type));
 const hasLines = (type) => isPointCue(type) || type === "FADE";
-const getCueTypeName = (type) => (type === "TM" ? "Scene" : type);
+const getCueTypeName = (type) => (type === "TM" ? "Scene" : type === "TEXTBOX" ? "Text box" : type);
 const getCueTypeOptionLabel = (type) =>
-  type === "TM" ? "SCENE" : type;
+  type === "TM" ? "SCENE" : type === "TEXTBOX" ? "TEXT BOX" : type;
 const FADE_TEXT_PADDING = 14;
 const DEFAULT_CUE_MARKER_HEIGHT = 20;
 const CUE_TEXT_GAP = 5;
@@ -94,14 +96,14 @@ const formatLineWidth = (value) => roundLineWidth(value).toFixed(1);
 const DEFAULT_MARGINS = { SFX: 150, TM: 100, DCA: 50 };
 const DEFAULT_COLORS = {
   POINTER: "#5b6474", SFX: "#cc00cc", TM: "#0000ff", DCA: "#ff0000",
-  FADE: "#008000", BLOCK: "#c9c9c9", NOTE: "#8a2be2",
+  FADE: "#008000", BLOCK: "#c9c9c9", NOTE: "#8a2be2", TEXTBOX: "#000000",
 };
 const DEFAULT_STYLES = {
   POINTER: { textSize: 20, lineWidth: 1.5 },
   SFX: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true, prefix: "", suffix: "" },
   TM: { textSize: 20, lineWidth: 1.5, textPosition: "above", cueLinePosition: "below", cueSide: "after", markerHeight: 20, viewCueLine: true, viewCuePoint: true, prefix: "", suffix: "" },
   DCA: { textSize: 20, lineWidth: 1.5, prefix: "", suffix: "" }, FADE: { textSize: 20, lineWidth: 1.5 },
-  BLOCK: { textSize: 20, lineWidth: 1.5 }, NOTE: { textSize: 20, lineWidth: 1.5 },
+  BLOCK: { textSize: 20, lineWidth: 1.5 }, NOTE: { textSize: 20, lineWidth: 1.5 }, TEXTBOX: { textSize: 16, lineWidth: 1.5 },
 };
 const DEFAULT_BLOCK_APPEARANCE = { fillColor: "#ffffff", fillOpacity: 0.25, lineEnabled: true, fillEnabled: true };
 const COLOR_PALETTE = [
@@ -159,6 +161,7 @@ const TOOL_BUTTONS = [
   { type: "NOTE", label: "Note", icon: mdiNoteTextOutline },
   { type: "FADE", label: "Fade", icon: mdiTrendingUp },
   { type: "BLOCK", label: "Block", icon: mdiBorderNoneVariant },
+  { type: "TEXTBOX", label: "Text box", icon: mdiCommentTextOutline },
 ];
 
 const CUSTOM_CUE_ICONS = [
@@ -1206,24 +1209,32 @@ export default function App() {
 
       const start = blockStart;
       setBlockStart(null);
+      const id = createId();
+      const isTextBox = mode === "TEXTBOX";
 
       pushUndo(cues);
       markDirty();
       setCues((prev) => [
         ...prev,
         {
-          id: createId(),
+          id,
           page: pageIndex,
           left: Math.min(start.x, x),
           top: Math.min(start.y, y),
-          right: Math.max(start.x, x),
-          bottom: Math.max(start.y, y),
+          right: Math.max(Math.max(start.x, x), Math.min(start.x, x) + (isTextBox ? 60 : 0)),
+          bottom: Math.max(Math.max(start.y, y), Math.min(start.y, y) + (isTextBox ? 40 : 0)),
           x: Math.min(start.x, x),
           y: Math.min(start.y, y),
           type: mode,
           label: "",
+          ...(isTextBox ? { textRuns: [], customPropertiesEnabled: true, customProperties: { blockAppearance: { lineEnabled: false, fillEnabled: false } } } : {}),
         },
       ]);
+      if (isTextBox) {
+        setSelectedCueId(id);
+        setShowInspector(true);
+        setMode("POINTER");
+      }
       return;
     }
 
@@ -1250,6 +1261,11 @@ export default function App() {
   const updateCue = async (id) => {
     const cue = cues.find((c) => c.id === id);
     if (!cue || lockedCueTypes[cue.type]) return;
+    if (cue.type === "TEXTBOX") {
+      setSelectedCueId(id);
+      setShowInspector(true);
+      return;
+    }
     setSelectedCueId(null);
 
     const newLabel = await requestAppDialog({ type: "prompt", title: "Edit cue", message: "Update the cue text.", value: cue.label, confirmLabel: "Save" });
@@ -1610,6 +1626,11 @@ export default function App() {
         }
       }
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const textBoxFonts = await Promise.all([
+        StandardFonts.Helvetica, StandardFonts.HelveticaBold,
+        StandardFonts.HelveticaOblique, StandardFonts.HelveticaBoldOblique,
+      ].map((name) => pdfDoc.embedFont(name)));
+      const textBoxFont = (format) => textBoxFonts[(format.bold ? 1 : 0) + (format.italic ? 2 : 0)];
 
       cues.forEach((cue) => {
         if (hiddenCueTypes[cue.type]) return;
@@ -1673,6 +1694,22 @@ export default function App() {
           }
           if (cueBlockAppearance.fillEnabled || cueBlockAppearance.lineEnabled) {
             page.drawRectangle(rectangleOptions);
+          }
+          if (cue.type === "TEXTBOX") {
+            const [originX] = viewport.convertToPdfPoint(0, 0);
+            const [unitX] = viewport.convertToPdfPoint(1, 0);
+            const scale = Math.abs(unitX - originX);
+            const layout = layoutTextBox(cue, cueStyle.textSize, measureTextBox);
+            layout.lines.forEach((line, row) => line.forEach((char) => {
+              const [x, y] = viewport.convertToPdfPoint(cue.left + 6 + char.x, cue.top + 6 + cueStyle.textSize + row * cueStyle.textSize * 1.25);
+              page.drawText(char.text, { x, y, size: cueStyle.textSize * scale, font: textBoxFont(char), color });
+              for (const offset of [char.underline ? -0.12 : null, char.strike ? 0.3 : null]) {
+                if (offset === null) continue;
+                const lineY = y + cueStyle.textSize * scale * offset;
+                page.drawLine({ start: { x, y: lineY }, end: { x: x + char.width * scale, y: lineY }, color, thickness: Math.max(0.5, cueStyle.textSize * scale / 16) });
+              }
+            }));
+            return;
           }
           page.drawText(cueText, {
             x: labelX,
@@ -2206,7 +2243,7 @@ export default function App() {
           <label><span>Colour</span><PaletteColorInput value={properties.color} onCommit={(value) => updateRoot("color", value)} />{resetButton("colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
         ) : (
           <>
-            <label><span>Line</span><PaletteColorInput value={properties.color} disabled={!cueBlockAppearance.lineEnabled} onCommit={(value) => updateRoot("color", value)} />{resetButton("line colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
+            <label><span>{cue.type === "TEXTBOX" ? "Text / line colour" : "Line"}</span><PaletteColorInput value={properties.color} disabled={cue.type !== "TEXTBOX" && !cueBlockAppearance.lineEnabled} onCommit={(value) => updateRoot("color", value)} />{resetButton("line colour", () => updateRoot("color", typeProperties.color), properties.color === typeProperties.color)}</label>
             <label><span>No line</span><input type="checkbox" checked={!cueBlockAppearance.lineEnabled} onChange={(e) => updateBlock("lineEnabled", !e.target.checked)} />{resetButton("line visibility", () => updateBlock("lineEnabled", typeProperties.blockAppearance.lineEnabled), cueBlockAppearance.lineEnabled === typeProperties.blockAppearance.lineEnabled)}</label>
             <label><span>Fill</span><PaletteColorInput value={cueBlockAppearance.fillColor} disabled={!cueBlockAppearance.fillEnabled} onCommit={(value) => updateBlock("fillColor", value)} />{resetButton("fill colour", () => updateBlock("fillColor", typeProperties.blockAppearance.fillColor), cueBlockAppearance.fillColor === typeProperties.blockAppearance.fillColor)}</label>
             <label><span>No fill</span><input type="checkbox" checked={!cueBlockAppearance.fillEnabled} onChange={(e) => updateBlock("fillEnabled", !e.target.checked)} />{resetButton("fill visibility", () => updateBlock("fillEnabled", typeProperties.blockAppearance.fillEnabled), cueBlockAppearance.fillEnabled === typeProperties.blockAppearance.fillEnabled)}</label>
@@ -2307,6 +2344,11 @@ export default function App() {
   };
 
   const beginEditingCueName = (cue) => {
+    if (cue.type === "TEXTBOX") {
+      setSelectedCueId(cue.id);
+      setShowInspector(true);
+      return;
+    }
     setCueNameDraft(cue.label);
     setEditingCueId(cue.id);
   };
@@ -2568,6 +2610,8 @@ export default function App() {
     setCues((current) => current.map((cue) => {
       if (cue.type !== convertFromType) return cue;
       const next = { ...cue, type: convertToType, customPropertiesEnabled: false, customProperties: undefined };
+      if (convertToType === "TEXTBOX") next.textRuns = [{ text: cue.label }];
+      else delete next.textRuns;
       const anchorX = cue.left ?? cue.x ?? 0;
       const anchorY = cue.top ?? cue.y ?? 0;
       if (isBlockCue(convertToType)) {
@@ -2612,7 +2656,7 @@ export default function App() {
     if (!await requestAppDialog({ type: "confirm", title: "Apply find and replace?", message: `This will ${action} in ${findReplaceMatches.length} cue${findReplaceMatches.length === 1 ? "" : "s"}. This can change a large amount of data. The safest option is to download a saved copy first.`, confirmLabel: "Apply changes", danger: true })) return;
     pushUndo(cues);
     setCues((current) => current.map((cue) => cue.type === findReplaceType && cue.label.includes(findText)
-      ? { ...cue, label: cue.label.split(findText).join(replaceText) }
+      ? { ...cue, ...(cue.type === "TEXTBOX" ? editText(cue, cue.label.split(findText).join(replaceText)) : { label: cue.label.split(findText).join(replaceText) }) }
       : cue));
     markDirty();
   };
@@ -2791,6 +2835,14 @@ export default function App() {
               )}
               {selectedCue && (
                 <div className="inspector-content">
+                  {selectedCue.type === "TEXTBOX" ? (
+                    <TextBoxEditor key={selectedCue.id} cue={selectedCue} disabled={Boolean(lockedCueTypes[selectedCue.type])} onChange={(updates) => {
+                      if (lockedCueTypes[selectedCue.type]) return;
+                      pushUndo(cues);
+                      setCues((current) => current.map((cue) => cue.id === selectedCue.id ? { ...cue, ...updates } : cue));
+                      markDirty();
+                    }} />
+                  ) : (
                   <label className="inspector-name-field">
                     <span>Cue name</span>
                     <input
@@ -2803,6 +2855,7 @@ export default function App() {
                       }}
                     />
                   </label>
+                  )}
                   <label className="custom-properties-toggle">
                     <span>Custom cue properties</span>
                     <input
@@ -3378,9 +3431,10 @@ export default function App() {
                     <ul>
                       <li><strong>SFX, Scene, and DCA</strong> create margin-based annotations.</li>
                       <li><strong>Note</strong> and custom Note types place text directly on the page.</li>
+                      <li><strong>Text box</strong> adds resizable multiline text with formatting for individual selections.</li>
                       <li>Select <strong>Pointer</strong> when you want to work without adding cues.</li>
                       <li>Drag cues and their handles without changing the current selection.</li>
-                      <li>Rename a cue by double-clicking it on the page or editing its name in the cue list.</li>
+                      <li>Rename a cue by double-clicking it on the page or editing its name in the cue list. For Text boxes, either action opens the Inspector content editor.</li>
                     </ul>
                   </article>
 
@@ -3411,6 +3465,18 @@ export default function App() {
                       <li><strong>Block</strong> uses two clicks to define opposite rectangle corners.</li>
                       <li>Drag either cue to move it. Use its round handles to reshape it.</li>
                       <li>Double-click the fade line or block body to add an optional label.</li>
+                    </ul>
+                  </article>
+
+                  <article className="help-card">
+                    <h3>Text boxes &amp; Inspector</h3>
+                    <ul>
+                      <li>Select <strong>Text box</strong> and click two opposite corners. Its Inspector opens automatically and the tool returns to Pointer.</li>
+                      <li>Enter multiple lines in <strong>Text box content</strong>. Select text and use Bold, Italic, Underline, or Strikethrough; the preview below shows the formatting.</li>
+                      <li>Ctrl/Cmd+B, Ctrl/Cmd+I, and Ctrl/Cmd+U toggle formatting on selected text in the editor. Styles can be combined.</li>
+                      <li>Each box has its own text size, text / line colour, border, fill, and opacity controls. New boxes have no visible border or fill.</li>
+                      <li>Drag a box to move it or its corner handles to resize it. A red ellipsis indicates overflow; enlarge the box to reveal more text.</li>
+                      <li>Projects and autosave retain all text and formatting. PDF export includes formatted text that fits inside the box.</li>
                     </ul>
                   </article>
 
@@ -3451,7 +3517,7 @@ export default function App() {
                     <h3>Options &amp; cue list</h3>
                     <ul>
                       <li>Expand any tool row to change its colour, text size, line width, or margin.</li>
-                      <li>BLOCK additionally supports fill colour, opacity, no fill, and no line.</li>
+                      <li>Block and Text box additionally support fill colour, opacity, no fill, and no line.</li>
                       <li>Search cues by name, type, or page from the cue list.</li>
                       <li>Search Options by cue type or setting name.</li>
                       <li>The Filter accordion controls which cue types appear in the list.</li>
@@ -3495,7 +3561,8 @@ export default function App() {
                     <kbd>Ctrl/Cmd-click</kbd><span>Toggle cues in a multiple selection.</span>
                     <kbd>Shift-click</kbd><span>Select a visible range in the cue list.</span>
                     <kbd>Pointer drag</kbd><span>Marquee-select visible cues intersecting the selection box.</span>
-                    <kbd>Double-click</kbd><span>Edit a cue, fade, block, or header label.</span>
+                    <kbd>Double-click</kbd><span>Edit a cue, fade, block, or header label, or open the Text box Inspector.</span>
+                    <kbd>Ctrl/Cmd + B / I / U</kbd><span>Toggle bold, italic, or underline on selected text in the Text box editor.</span>
                     <kbd>Drag</kbd><span>Move cues, dividers, and headers, or adjust visible handles.</span>
                     <kbd>F / 5</kbd><span>Select Fade. Use B / 6 to select Block.</span>
                   </div>
@@ -3803,7 +3870,16 @@ export default function App() {
                             updateCue(cue.id);
                           }}
                         />
-                        <text
+                        {cue.type === "TEXTBOX" ? (
+                          <g pointerEvents="none" fill={color} fontFamily="Arial" fontSize={cueStyle.textSize}>
+                            {layoutTextBox(cue, cueStyle.textSize, measureTextBox).lines.map((line, row) => (
+                              <text key={row} xmlSpace="preserve" y={cue.top + 6 + cueStyle.textSize + row * cueStyle.textSize * 1.25}>
+                                {line.map((char, i) => <tspan key={i} x={cue.left + 6 + char.x} fontWeight={char.bold ? "bold" : "normal"} fontStyle={char.italic ? "italic" : "normal"} textDecoration={[char.underline && "underline", char.strike && "line-through"].filter(Boolean).join(" ") || undefined}>{char.text}</tspan>)}
+                              </text>
+                            ))}
+                            {layoutTextBox(cue, cueStyle.textSize, measureTextBox).overflow && <text x={cue.right - 16} y={cue.bottom - 2} fill="#dc2626" fontSize={12}>…</text>}
+                          </g>
+                        ) : <text
                           x={cue.left}
                           y={cue.top - 6}
                           fill={color}
@@ -3817,7 +3893,7 @@ export default function App() {
                           }}
                         >
                           {getCueDisplayText(cue)}
-                        </text>
+                        </text>}
                         {corners.map(([corner, x, y]) => (
                           <circle
                             key={corner}

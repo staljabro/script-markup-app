@@ -8,6 +8,10 @@ Open that cue type in Options and check **Lock all cues of this type**. Locked c
 
 Check General cue-type visibility, the cue-list type filters, the search field, and the “Custom cues only” filter. Hidden cue types are also excluded from export.
 
+## Some Text box text is missing
+
+A red ellipsis on a box means its content exceeds the available height. Drag its corner handles to enlarge it or reduce its text size in the Inspector. All text remains in the project, but PDF export includes only the text that fits. To format text, select it in the Inspector text area, then use the formatting buttons; the preview below shows the result.
+
 ## Prompt/Showcall pages cannot be disabled
 
 Move or remove cues and dividers that occupy the calling surface first.

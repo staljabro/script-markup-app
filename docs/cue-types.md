@@ -8,6 +8,7 @@
 - **Note**: free-position text cue.
 - **Fade**: two-point line with an optional label.
 - **Block**: rectangular area with optional line, fill, opacity, and label.
+- **Text box**: resizable multiline text with formatting for individual selections. Click two opposite corners on the PDF to create a box, then edit it in the Inspector. Double-click a box to reopen its editor.
 
 Warn and Mark are no longer built-in. When an older project contains them, they are migrated to custom Note types.
 
@@ -24,9 +25,11 @@ Open **Options**, search if necessary, then expand a cue type. Depending on the 
 - Placement before or after the alignment guide
 - Vertical marker height
 - Cue-line and cue-point visibility
-- Block line, fill, fill colour, and opacity
+- Block and Text box line, fill, fill colour, and opacity
 
 Built-in settings have reset buttons that restore application defaults. Resetting a cue type does not overwrite per-cue custom properties.
+
+Text boxes support bold, italic, underline, and strikethrough for selected text in their [Inspector content editor](cue-inspector.md#text-boxes). Each box also supports its own appearance overrides. New boxes start with no border or fill.
 
 ## Visibility and locking
 

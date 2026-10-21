@@ -1387,3 +1387,35 @@ input[type="range"] { accent-color: #3d63dd; }
   .app-toolbar .document-name-display,
   .document-name-editor { font-size: 23px; }
 }
+.text-box-editor {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #d8dfe2;
+  border-radius: 9px;
+  background: #fff;
+}
+.text-box-editor legend {
+  padding: 0 4px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+.text-box-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  padding: 7px 9px;
+  border: 1px solid #d6dae2;
+  border-radius: 7px;
+  background: #fff;
+  color: #202938;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.text-format-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
+.text-format-toolbar button { min-width: 32px; min-height: 32px; }
+.text-format-toolbar button[aria-pressed="true"] { background: #dbeafe; color: #1d4ed8; }
+.text-box-editor small { display: block; margin-top: 6px; font-size: 12px; line-height: 1.4; }
+.text-box-format-preview { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; padding: 8px; border: 1px solid #cbd5e1; font: 14px/1.5 Arial, sans-serif; }

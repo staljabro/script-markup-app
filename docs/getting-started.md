@@ -8,6 +8,8 @@
 4. Click a page and enter the cue text.
 5. Use **Options** to configure cue types and **Inspector** to change selected cues.
 
+For multiline formatted text, choose **Text box** and click two opposite corners. Enter its content in the Inspector that opens, select text to format it, and drag the box's corner handles to resize it. See [Text boxes](cue-inspector.md#text-boxes).
+
 Opening a new PDF clears the current cues, custom cue types, and cue-type changes, then restores the application defaults. Save the existing project first if it must be retained.
 
 ## Save your work

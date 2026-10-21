@@ -17,7 +17,8 @@
 | Shift-click in cue list | Select the visible range from the selection anchor |
 | Ctrl/Cmd + Shift-click | Add a cue-list range to the current selection |
 | Pointer drag on empty page space | Marquee-select intersecting visible cues |
-| Double-click | Edit a cue, fade, block, or header label |
+| Double-click | Edit a cue, fade, block, or header label; open the Text box content Inspector |
+| Ctrl/Cmd + B / I / U in the Text box editor | Toggle bold / italic / underline on selected text |
 | S / 1 | Select SFX |
 | T / 2 | Select Scene |
 | D / 3 | Select DCA |
@@ -25,6 +26,6 @@
 | F / 5 | Select Fade |
 | B / 6 | Select Block |
 
-Keyboard shortcuts do not activate while typing in an input, select, or text area.
+General cue shortcuts do not activate while typing in an input, select, or text area. The Text box editor handles its own formatting shortcuts; strikethrough is available from its formatting toolbar.
 
 [Documentation index](README.md)

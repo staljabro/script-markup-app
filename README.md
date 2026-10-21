@@ -9,6 +9,7 @@ The complete user guide is in [docs/README.md](docs/README.md). Useful starting 
 - [Getting started](docs/getting-started.md)
 - [Cue types and cue-type options](docs/cue-types.md)
 - [Creating, selecting, and editing cues](docs/editing-cues.md)
+- [Cue Inspector and text box formatting](docs/cue-inspector.md)
 - [Custom cue types](docs/custom-cue-types.md)
 - [Tools](docs/tools.md)
 - [Projects, autosave, compatibility, and export](docs/projects-and-export.md)
@@ -19,6 +20,7 @@ The complete user guide is in [docs/README.md](docs/README.md). Useful starting 
 
 - Margin-based SFX, Scene, and DCA cues
 - Notes, fades, blocks, and user-defined cue types
+- Resizable multiline text boxes with bold, italic, underline, and strikethrough for selected text
 - Per-type settings and per-cue property overrides
 - Multiple selection using marquee drag, Ctrl/Cmd-click, or Shift-click
 - Bulk alignment, distribution, duplication, page movement, and property transfer
@@ -37,6 +39,8 @@ The complete user guide is in [docs/README.md](docs/README.md). Useful starting 
 5. Export the finished annotated PDF.
 
 Opening a new PDF starts a fresh document with default cue settings and no custom cue types. Loading a `.cueproj` restores the settings saved in that project.
+
+To add a **Text box**, select its toolbar tool and click two opposite corners on the page. Its Inspector opens automatically: enter multiple lines, select text, and use the formatting buttons or Ctrl/Cmd+B, I, and U. Each box has its own text size, colour, border, and fill controls. Drag the box or its corner handles to move or resize it. A red ellipsis indicates overflow; enlarge the box before export to include more text. Projects retain all text and formatting; PDF export includes only the text that fits.
 
 ## Development
 
